@@ -202,6 +202,10 @@ export function useRoundstorm() {
     setRoomId(child.id)
   }, [roomId, refreshBoot])
 
+  const reload = useCallback(async () => {
+    if (roomId) await loadRoom(roomId)
+  }, [roomId, loadRoom])
+
   const room = boot?.rooms.find(r => r.id === roomId) ?? null
   const agentById = useCallback(
     (id: string | null) => boot?.agents.find(a => a.id === id) ?? null, [boot])
@@ -209,7 +213,7 @@ export function useRoundstorm() {
   return {
     boot, room, roomId, setRoomId, messages, active, activity, error, setError, starting,
     positions, sources, results, ledger,
-    send, startDeliberation, stop, extend, interrupt, fork,
+    send, startDeliberation, stop, extend, interrupt, fork, reload,
     setRoomTier, updateAgent, agentById, refreshBoot,
   }
 }

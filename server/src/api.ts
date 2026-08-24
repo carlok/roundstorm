@@ -216,6 +216,25 @@ export function makeApi() {
     res.json(db.getRoom(req.params.id))
   })
 
+  api.delete('/rooms/:id/messages', (req, res) => {
+    const room = db.getRoom(req.params.id)
+    if (!room) return res.status(404).json({ error: 'no such room' })
+    if (db.activeDeliberation(room.id)) {
+      return res.status(409).json({ error: 'stop the running deliberation first' })
+    }
+    const info = db.clearRoom(room.id)
+    db.logEvent('room.cleared', { roomId: room.id, payload: info })
+    res.json({ ok: true, ...info })
+  })
+
+  api.patch('/projects/:id', (req, res) => {
+    const { name, workingDir, defaultTier } = req.body ?? {}
+    const p = db.updateProject(req.params.id, { name, workingDir, defaultTier })
+    if (!p) return res.status(404).json({ error: 'no such project' })
+    db.logEvent('project.updated', { payload: { workingDir: p.workingDir } })
+    res.json(p)
+  })
+
   api.delete('/rooms/:id', (req, res) => {
     const room = db.getRoom(req.params.id)
     if (!room) return res.status(404).json({ error: 'no such room' })

@@ -301,9 +301,55 @@ export function deleteAgent(id: string): { removedFromRooms: number } {
   return { removedFromRooms: rooms.c }
 }
 
-/** Rooms cascade: messages, deliberations, positions and sources go with them. */
+/**
+ * Rooms cascade: messages, deliberations, positions and sources go with them.
+ * Memory cards are not covered by the foreign key (they hang off the agent), so
+ * they are removed explicitly — otherwise an agent keeps remembering a room the
+ * user deleted.
+ */
 export function deleteRoom(id: string) {
+  db.prepare('DELETE FROM memory_cards WHERE room_id=?').run(id)
   db.prepare('DELETE FROM rooms WHERE id=?').run(id)
+}
+
+/**
+ * Empty a room without destroying it. The room and its cast stay; everything the
+ * room produced goes.
+ *
+ * That includes the memory cards derived from it — both the ones still waiting
+ * in the inbox and the ones already accepted into an agent's long-term memory.
+ * Leaving accepted cards behind would mean an agent still "remembers" a
+ * discussion the user believes they erased, and silently carries it into the
+ * next one. Clearing has to mean clearing.
+ */
+export function clearRoom(id: string): { messages: number; memoryCards: number } {
+  const n = (db.prepare('SELECT COUNT(*) AS c FROM messages WHERE room_id=?').get(id) as any).c
+  const mem = (db.prepare('SELECT COUNT(*) AS c FROM memory_cards WHERE room_id=?').get(id) as any).c
+  db.prepare('DELETE FROM memory_cards WHERE room_id=?').run(id)
+  db.prepare('DELETE FROM position_ops WHERE position_id IN (SELECT id FROM positions WHERE room_id=?)').run(id)
+  db.prepare('DELETE FROM positions WHERE room_id=?').run(id)
+  db.prepare('DELETE FROM sources WHERE room_id=?').run(id)
+  db.prepare('DELETE FROM results WHERE room_id=?').run(id)
+  db.prepare('DELETE FROM deliberations WHERE room_id=?').run(id)
+  db.prepare('DELETE FROM embeddings WHERE room_id=?').run(id)
+  db.prepare('DELETE FROM messages WHERE room_id=?').run(id)
+  return { messages: n, memoryCards: mem }
+}
+
+export function updateProject(id: string, patch: { name?: string; workingDir?: string | null; defaultTier?: Tier }) {
+  const cur = db.prepare('SELECT * FROM projects WHERE id=?').get(id) as any
+  if (!cur) return undefined
+  db.prepare('UPDATE projects SET name=?, working_dir=?, default_tier=? WHERE id=?').run(
+    patch.name ?? cur.name,
+    patch.workingDir === undefined ? cur.working_dir : patch.workingDir,
+    patch.defaultTier ?? cur.default_tier,
+    id)
+  return toProject(db.prepare('SELECT * FROM projects WHERE id=?').get(id))
+}
+
+export const getProject = (id: string): Project | undefined => {
+  const r = db.prepare('SELECT * FROM projects WHERE id=?').get(id)
+  return r ? toProject(r) : undefined
 }
 
 export function renameRoom(id: string, name: string) {

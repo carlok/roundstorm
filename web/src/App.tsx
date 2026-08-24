@@ -156,6 +156,20 @@ export function App() {
       { label: 'Edit cast…', onSelect: () => setRoomSheet({ room }) },
       { label: `Export ${room.kind === 'dm' ? 'chat' : 'room'} as Markdown`,
         onSelect: () => { window.open(apiUrl(`/api/rooms/${room.id}/export?format=markdown`), '_blank') } },
+      { label: 'Clear transcript…', danger: true, onSelect: () => setAsk({
+        title: `Clear “${room.name}”?`,
+        detail: 'Deletes the messages, positions, sources, results and everything the agents remembered from this room — including memory cards you already accepted. The room and its cast stay.',
+        confirmLabel: 'Clear', danger: true,
+        onConfirm: async () => {
+          const res = await fetch(apiUrl(`/api/rooms/${room.id}/messages`), { method: 'DELETE' })
+          if (!res.ok) {
+            const { error } = await res.json().catch(() => ({ error: 'could not clear' }))
+            return flash(error)
+          }
+          if (rs.roomId === room.id) await rs.reload()
+          await rs.refreshBoot()
+        },
+      }) },
       { label: 'Delete room…', danger: true, onSelect: del },
     ] })
   }, [rs, flash])
@@ -522,6 +536,7 @@ export function App() {
       {sheet && rs.room && (
         <StartSheet
           room={rs.room} roster={roster} modes={rs.boot.modes}
+          lastQuestion={[...rs.messages].reverse().find(m => m.authorType === 'human')?.body ?? ''}
           onClose={() => setSheet(false)}
           onStart={opts => { setSheet(false); void rs.startDeliberation(opts) }}
         />

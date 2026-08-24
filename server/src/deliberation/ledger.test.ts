@@ -220,3 +220,75 @@ test('a synthesiser echoing the agreement level back is not accepted as a conclu
   const real = 'The room converged on starting with a coast-down, because it captures the jump.'
   assert.equal(pickConclusionForTest(real, fallback, 'strong_consensus'), real)
 })
+
+// --- capability scoping ---
+
+test('file access is refused when no working directory is set', async () => {
+  // Without --add-dir/--cd the brain runs wherever the daemon happens to be,
+  // which for a Finder-launched app is `/`. Granting Write and Bash there is not
+  // a scoped workstation, it is the whole machine.
+  const { resolveWorkspaceForTest } = await import('./scheduler.ts')
+  const proj = db.createProject('NoDir', null)
+  const r = db.createRoom(proj.id, 'NoDir room', 'room', [A.id], 'full')
+
+  const got = resolveWorkspaceForTest(r, 'full')
+  assert.equal(got.tier, 'research', 'full tier must not survive without a directory')
+  assert.equal(got.workingDir, null)
+  assert.equal(got.downgraded, true)
+})
+
+test('file access is granted once a working directory exists', async () => {
+  const { resolveWorkspaceForTest } = await import('./scheduler.ts')
+  const proj = db.createProject('WithDir', '/tmp/rs-workspace')
+  const r = db.createRoom(proj.id, 'WithDir room', 'room', [A.id], 'full')
+
+  const got = resolveWorkspaceForTest(r, 'full')
+  assert.equal(got.tier, 'full')
+  assert.equal(got.workingDir, '/tmp/rs-workspace')
+  assert.equal(got.downgraded, false)
+})
+
+test('reasoning and research never need a directory', async () => {
+  const { resolveWorkspaceForTest } = await import('./scheduler.ts')
+  const proj = db.createProject('Plain', null)
+  const r = db.createRoom(proj.id, 'Plain room', 'room', [A.id], 'research')
+  for (const t of ['reasoning', 'research'] as const) {
+    const got = resolveWorkspaceForTest(r, t)
+    assert.equal(got.tier, t)
+    assert.equal(got.downgraded, false)
+  }
+})
+
+test('clearing a room also erases what the agents remembered from it', () => {
+  // Otherwise an agent still carries a discussion the user believes they erased
+  // into the next one.
+  const proj = db.createProject('Clearable')
+  const r = db.createRoom(proj.id, 'Clearable room', 'room', [A.id])
+  db.insertMessage({ roomId: r.id, authorType: 'human', body: 'a question' })
+  const proposed = db.proposeMemory({
+    agentId: A.id, projectId: proj.id, roomId: r.id, scope: 'project',
+    type: 'result', text: 'Something learned here.', sourceMessageId: null,
+  })
+  db.setMemoryStatus(proposed.id, 'accepted')
+  assert.equal(db.listMemory({ agentId: A.id, status: 'accepted' }).filter(c => c.roomId === r.id).length, 1)
+
+  const info = db.clearRoom(r.id)
+  assert.equal(info.messages, 1)
+  assert.equal(info.memoryCards, 1)
+  assert.equal(db.listMemory({ agentId: A.id }).filter(c => c.roomId === r.id).length, 0,
+    'an accepted card outlived the room it came from')
+  assert.equal(db.listMessages(r.id).length, 0)
+  assert.ok(db.getRoom(r.id), 'the room itself must survive a clear')
+})
+
+test('deleting a room takes its memory with it', () => {
+  const proj = db.createProject('Deletable')
+  const r = db.createRoom(proj.id, 'Deletable room', 'room', [A.id])
+  const c = db.proposeMemory({
+    agentId: A.id, projectId: proj.id, roomId: r.id, scope: 'project',
+    type: 'result', text: 'Learned in a room that will not exist.', sourceMessageId: null,
+  })
+  db.setMemoryStatus(c.id, 'accepted')
+  db.deleteRoom(r.id)
+  assert.equal(db.listMemory({ agentId: A.id }).filter(x => x.roomId === r.id).length, 0)
+})

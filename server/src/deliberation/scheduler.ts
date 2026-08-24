@@ -11,7 +11,7 @@
  *
  * Sealed opening: round 1 is written blind and revealed together.
  */
-import type { Agent, Deliberation, Message, Room } from '../types.ts'
+import type { Agent, Deliberation, Message, Room, Tier } from '../types.ts'
 import * as db from '../db.ts'
 import { bus } from '../bus.ts'
 import { getAdapter, schemaFor } from '../adapters/registry.ts'
@@ -198,7 +198,16 @@ export async function runTurn(args: {
     return
   }
 
-  const tier = lowerTier(room.tier, agent.tierCeiling)
+  const requested = lowerTier(room.tier, agent.tierCeiling)
+  const workspace = resolveWorkspace(room, requested)
+  const tier = workspace.tier
+  if (workspace.downgraded) {
+    db.logEvent('tier.downgraded', {
+      roomId: room.id, deliberationId: deliberation.id, agentId: agent.id,
+      payload: { requested, granted: tier, reason: 'no working directory set for this project' },
+    })
+  }
+
   const ctx = composeContext({
     agent, room, roster, deliberation, round, history, steers,
     schemaEnforced: adapter.schemaEnforced,
@@ -245,7 +254,7 @@ export async function runTurn(args: {
       userPrompt: ctx.userPrompt,
       model: agent.model,
       tier,
-      workingDir: null,
+      workingDir: workspace.workingDir,
       schema: schemaFor(adapter, TURN_SCHEMA),
     }, turnAbort.signal)) {
       if (ev.type === 'activity') setActivity(room.id, agent.id, 'thinking', ev.text, round)
@@ -386,3 +395,24 @@ const RANK = { reasoning: 0, research: 1, workstation: 2, full: 3 } as const
 function lowerTier(a: Room['tier'], b: Agent['tierCeiling']) {
   return RANK[a] <= RANK[b] ? a : b
 }
+
+/**
+ * Resolve the directory agents may touch, and refuse to grant file access
+ * without one.
+ *
+ * The tiers above `research` are meaningless unless the CLI is actually confined
+ * to a directory: without `--add-dir` / `--cd` the brain simply runs wherever the
+ * daemon happens to be, which for a Finder-launched app is `/`. Granting
+ * Write and Bash in that situation is not a scoped workstation, it is the whole
+ * machine. So a room asking for file access with no working directory set is
+ * downgraded to `research` rather than quietly given more than it asked for.
+ */
+function resolveWorkspace(room: Room, tier: Tier): { tier: Tier; workingDir: string | null; downgraded: boolean } {
+  if (RANK[tier] < RANK['workstation']) return { tier, workingDir: null, downgraded: false }
+  const dir = db.getProject(room.projectId)?.workingDir ?? null
+  if (!dir) return { tier: 'research', workingDir: null, downgraded: true }
+  return { tier, workingDir: dir, downgraded: false }
+}
+
+/** Exposed for tests: the scoping decision is the safety-critical part. */
+export const resolveWorkspaceForTest = resolveWorkspace

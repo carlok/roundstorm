@@ -3,10 +3,12 @@ import type { Agent, ModeInfo, Room } from '../types.ts'
 import { Avatar } from './Avatar.tsx'
 
 /** One sheet, sensible defaults, no schema editing (plan §2.5). */
-export function StartSheet({ room, roster, modes, onStart, onClose }: {
+export function StartSheet({ room, roster, modes, lastQuestion, onStart, onClose }: {
   room: Room
   roster: Agent[]
   modes: ModeInfo[]
+  /** Last thing the human said in this room, if anything. */
+  lastQuestion: string
   onStart: (opts: Record<string, unknown>) => void
   onClose: () => void
 }) {
@@ -14,7 +16,10 @@ export function StartSheet({ room, roster, modes, onStart, onClose }: {
   const [rounds, setRounds] = useState(4)
   const [style, setStyle] = useState<'parallel' | 'pingpong'>('parallel')
   const [sealedOpening, setSealed] = useState(true)
-  const [question, setQuestion] = useState('')
+  // Prefilled rather than left blank with a note saying the blank means
+  // something. If you already typed the question into the composer, it is here;
+  // if you did not, this is the only place you need to type it.
+  const [question, setQuestion] = useState(lastQuestion)
 
   const blurb = modes.find(m => m.key === mode)?.blurb ?? ''
   // Rough, but shown before the button because deliberations cost real time and
@@ -31,8 +36,13 @@ export function StartSheet({ room, roster, modes, onStart, onClose }: {
           <span>Question</span>
           <textarea
             autoFocus rows={4} value={question} onChange={e => setQuestion(e.target.value)}
-            placeholder="Leave blank to use your last message in this room."
+            placeholder="What should they argue about? Give it a question with two defensible answers."
           />
+          <small>
+            {lastQuestion
+              ? 'Taken from your last message. Edit it, or replace it entirely.'
+              : 'You do not need to send anything first — this is the question they get.'}
+          </small>
         </label>
 
         <label className="field">
@@ -92,7 +102,7 @@ export function StartSheet({ room, roster, modes, onStart, onClose }: {
           </span>
           <div>
             <button onClick={onClose}>Cancel</button>
-            <button className="primary"
+            <button className="primary" disabled={!question.trim()}
                     onClick={() => onStart({ mode, rounds, style, sealedOpening, question })}>
               Start
             </button>

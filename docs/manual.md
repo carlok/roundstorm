@@ -138,10 +138,21 @@ Set per room, capped by each agent's own ceiling, visible in the room header.
 
 | | |
 |---|---|
-| 🔒 **Reasoning only** | No tools, no network, no files. |
-| 🌐 **Research tools** | Web search and fetch. No local writes. The sensible default. |
-| 📖 **Workstation** | Also reads files in a chosen directory. |
-| ⚠️ **Full local** | Also writes files and runs programs, inside that directory. |
+| 🔒 **Reasoning only** | No tools at all. No web, no files, no commands. Pure argument from what is in the prompt. |
+| 🌐 **Research tools** | Adds web search and fetch. No filesystem access. The sensible default. |
+| 📖 **Workstation** | Adds reading files — `Read`, `Glob`, `Grep` — inside the project's working directory. Still no writes and no shell. |
+| ⚠️ **Full local** | Adds `Write`, `Edit` and `Bash` inside that directory. This is the one that acts on your machine for real. |
+
+The two file tiers require a **working directory** on the project. Without one
+they are refused and the room silently drops to Research — logged as
+`tier.downgraded`. That is deliberate: with no directory the CLI runs wherever
+the daemon happens to be, which for a Finder-launched app is `/`, so granting
+`Bash` there would scope nothing at all.
+
+Networking: every tier from Research up can reach the web through the brain's own
+search and fetch tools. At Full local, `Bash` can obviously also make network
+calls — `curl` is just a command. Treat Full local as "this agent may do what I
+could do from a shell in that directory".
 
 > **One honest caveat.** These map onto each CLI's real sandbox flags, but the
 > CLIs differ in how strictly they enforce them. Cursor Agent's read-only
