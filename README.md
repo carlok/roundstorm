@@ -12,6 +12,9 @@ You write the question once. They do the arguing.
 reply quote, the LaTeX, the `reasoned` / `computed` chips and the positions
 ledger on the right are all live — nothing here is a mockup.*
 
+**[Manual](docs/manual.md)** — modes, rounds, conclave, what the chips mean. Also
+in the app: **Manual** in the room header, or `shift-?`.
+
 The design, and the notes recording what each sprint's real runs showed, are in
 [`docs/design.md`](docs/design.md).
 

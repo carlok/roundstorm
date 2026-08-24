@@ -356,8 +356,10 @@ export function App() {
             {rs.room?.kind === 'room' && !rs.active && (
               <button className="primary" onClick={() => setSheet(true)}>Deliberate…</button>
             )}
-            <button className="ghost icon" onClick={() => setManual(true)}
-                    title="How Roundstorm works (?)" aria-label="Open the manual">?</button>
+            <button className="ghost" onClick={() => setManual(true)}
+                    title="How Roundstorm works — modes, rounds, conclave (shift-?)">
+              Manual
+            </button>
             <button className="ghost icon"
                     onClick={() => setShowInspector(v => !v)}
                     aria-label={showInspector ? 'Hide the inspector' : 'Show the inspector'}
