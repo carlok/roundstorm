@@ -319,6 +319,17 @@ export function makeApi() {
     const q = String(question).trim() || lastHumanMessage(room.id)
     if (!q) return res.status(400).json({ error: 'ask a question first' })
 
+    // A question typed into the deliberation sheet has to land in the transcript
+    // too, otherwise the room opens with agents answering something the record
+    // never shows. Skip it when the question already is the last thing said.
+    if (q !== lastHumanMessage(room.id)) {
+      const asked = db.insertMessage({ roomId: room.id, authorType: 'human', body: q })
+      db.logEvent('human.message', {
+        roomId: room.id, payload: { messageId: asked.id, viaDeliberationSheet: true },
+      })
+      bus.emit({ type: 'message', message: asked })
+    }
+
     const d = db.createDeliberation({
       roomId: room.id, mode: mode as Mode, rounds: Math.max(1, Math.min(20, Number(rounds))),
       style: style as Style, sealedOpening: !!sealedOpening, status: 'running',
