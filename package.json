@@ -1,7 +1,14 @@
 {
   "name": "roundstorm",
-  "private": true,
   "version": "0.1.0",
+  "description": "Local-first multi-agent research deliberation: persistent AI researchers argue a hard question for N rounds.",
+  "author": "Carlo Perassi",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/carlok/roundstorm.git"
+  },
+  "private": true,
   "type": "module",
   "scripts": {
     "dev": "concurrently -n daemon,web -c cyan,magenta \"npm:dev:daemon\" \"npm:dev:web\"",

@@ -6,6 +6,12 @@ an ordinary group chat.
 
 You write the question once. They do the arguing.
 
+![Roundstorm](docs/img/roundstorm.png)
+
+*Curie (Gemini, via Antigravity) answering Gauss in round 2 of a real run. The
+reply quote, the LaTeX, the `reasoned` / `computed` chips and the positions
+ledger on the right are all live — nothing here is a mockup.*
+
 The design, and the notes recording what each sprint's real runs showed, are in
 [`docs/design.md`](docs/design.md).
 
@@ -205,6 +211,13 @@ from who backs what, and the synthesiser is *told* the level rather than asked t
 judge it — which is what stops a tidy-sounding "the room agreed" being written
 over a record showing a 2–2 split.
 
+![A result card](docs/img/result-card.png)
+
+*Every deliberation ends in one of these. The agreement level is derived from the
+ledger before any prose is written, and the reasoning names who conceded what and
+in which round. "Two competing positions remain" and "conclave failed to reach
+consensus" are legitimate outcomes, reported as results rather than errors.*
+
 Positions are de-duplicated by meaning. Agents reliably restate a peer's position
 under a new title instead of endorsing it, which fragments the record — a room in
 unanimous agreement reported as "no reliable conclusion" because each agent filed
@@ -279,10 +292,7 @@ web/src/                React UI
 
 ## Licence
 
-Not yet chosen, so for now this is **all rights reserved** — the default when a
-repository carries no licence. That is fine while it is private; it has to be
-settled before the repo is made public, since without a licence nobody may
-legally use, copy or modify it.
+MIT. See [LICENSE](LICENSE).
 
-No dependency constrains the choice: every runtime dependency is MIT, and there
+No dependency constrains that choice: every runtime dependency is MIT, and there
 is no copyleft anywhere in the tree.
