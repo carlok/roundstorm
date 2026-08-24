@@ -1,0 +1,734 @@
+:root {
+  --bg: #ffffff;
+  --bg-alt: #f6f7f9;
+  --bg-sunken: #eef0f4;
+  --fg: #16181d;
+  --fg-dim: #646b7a;
+  --fg-faint: #8b93a3;
+  --line: #e2e5ea;
+  --accent: #3b6fd4;
+  --danger: #c2384a;
+  --radius: 10px;
+  --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif;
+  --mono: ui-monospace, 'SF Mono', Menlo, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16181d;
+    --bg-alt: #1c1f26;
+    --bg-sunken: #24272f;
+    --fg: #e8eaee;
+    --fg-dim: #9aa2b1;
+    --fg-faint: #6f7788;
+    --line: #2b2f38;
+    --accent: #6d9bf1;
+    --danger: #e0616f;
+  }
+}
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
+body {
+  font-family: var(--font);
+  font-size: 14px;
+  color: var(--fg);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+button { font: inherit; color: inherit; cursor: pointer; }
+
+.booting { display: grid; place-items: center; height: 100%; color: var(--fg-dim); }
+.booting-inner { text-align: center; max-width: 380px; }
+.booting-inner p { margin: 0 0 6px; font-size: 15px; }
+.booting-inner small { display: block; color: var(--fg-faint); font-size: 12.5px; line-height: 1.5; }
+.booting-error { margin-top: 14px; color: var(--danger) !important; }
+.booting-error code {
+  font-family: var(--mono); background: var(--bg-sunken);
+  padding: 1px 5px; border-radius: 4px;
+}
+
+/*
+ * Each column scrolls on its own; the page itself never does.
+ *
+ * `min-height: 0` on the children is what makes that true. Grid and flex items
+ * default to `min-height: auto`, which refuses to shrink below their content —
+ * so a long transcript pushed the whole grid past the viewport and the document
+ * scrolled instead, carrying the sidebar, the room header and the deliberation
+ * bar out of view with it.
+ */
+.app {
+  display: grid; grid-template-columns: 232px 1fr;
+  height: 100%; overflow: hidden;
+}
+.app > * { min-height: 0; }
+
+/* ---------- left pane ---------- */
+/*
+ * The desktop window uses a transparent title bar, so macOS draws the
+ * traffic-light buttons ON TOP of the content — directly over the "Rooms"
+ * heading and its + button, which made those controls unclickable in the
+ * packaged app while working perfectly in a browser (no titlebar to overlap).
+ *
+ * `--titlebar` reserves that strip. It is 0 in a browser and set from JS when
+ * running under Tauri.
+ */
+:root { --titlebar: 0px; }
+
+.pane-left {
+  background: var(--bg-alt);
+  border-right: 1px solid var(--line);
+  overflow-y: auto;
+  padding: calc(12px + var(--titlebar)) 8px 24px;
+}
+
+/*
+ * The reserved strip stays draggable so the window still behaves like a window.
+ *
+ * It deliberately does NOT span the full width. A full-width fixed strip sits on
+ * top of whatever is at y=0 in every column — it swallowed every click on the
+ * Inspector tabs, which start at the very top of the right pane. The traffic
+ * lights are top-left, so that is the only region that has to be reserved.
+ */
+.titlebar-drag {
+  position: fixed; top: 0; left: 0; width: 232px;
+  height: var(--titlebar); z-index: 30;
+  -webkit-app-region: drag; app-region: drag;
+}
+.pane-title {
+  font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--fg-faint); padding: 14px 8px 6px;
+}
+.room-item {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  text-align: left; padding: 7px 8px; border: 0; border-radius: 7px;
+  background: transparent; color: var(--fg);
+}
+.room-item:hover { background: var(--bg-sunken); }
+.room-item.sel { background: var(--accent); color: #fff; }
+.agent-item { display: flex; align-items: center; gap: 8px; padding: 5px 8px; }
+.agent-meta { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; }
+.agent-meta small { color: var(--fg-faint); font-size: 11px; }
+
+/* ---------- main pane ---------- */
+.pane-main { display: flex; flex-direction: column; min-width: 0; height: 100%; overflow: hidden; }
+.room-head {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 12px; padding: calc(14px + var(--titlebar)) 20px 14px;
+  border-bottom: 1px solid var(--line);
+  flex: none;
+}
+.room-head h1 { font-size: 16px; margin: 0; }
+.room-sub { color: var(--fg-faint); font-size: 12px; margin-top: 2px; }
+.room-actions { display: flex; gap: 8px; align-items: center; }
+.room-actions select {
+  font: inherit; padding: 5px 8px; border-radius: 7px;
+  border: 1px solid var(--line); background: var(--bg); color: var(--fg);
+}
+button.primary {
+  background: var(--accent); color: #fff; border: 0;
+  padding: 6px 14px; border-radius: 7px; font-weight: 500;
+}
+button.danger { color: var(--danger); }
+
+/* ---------- control bar ---------- */
+.controlbar {
+  background: var(--bg-alt); border-bottom: 1px solid var(--line);
+  padding: 9px 20px; font-size: 12.5px;
+  /* Stays put while the transcript scrolls under it. */
+  flex: none;
+}
+.controlbar-top { display: flex; align-items: center; gap: 7px; color: var(--fg-dim); }
+.cb-mode { font-weight: 600; color: var(--fg); }
+.cb-sep { color: var(--fg-faint); }
+.cb-actions { margin-left: auto; display: flex; gap: 6px; }
+.cb-actions button {
+  border: 1px solid var(--line); background: var(--bg);
+  padding: 3px 10px; border-radius: 6px; font-size: 12px;
+}
+.controlbar-agents {
+  display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 8px;
+}
+.cb-agent { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.cb-agent-name { font-weight: 500; }
+.cb-agent-detail { color: var(--fg-faint); }
+.cb-waiting { opacity: .55; }
+.cb-error .cb-agent-detail { color: var(--danger); }
+.spin { display: inline-block; animation: spin 1.4s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---------- transcript ---------- */
+.transcript { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 20px 24px; }
+.empty { color: var(--fg-faint); text-align: center; margin-top: 18vh; }
+.empty p { margin: 4px 0; }
+.empty-sub { font-size: 13px; }
+
+.round-divider {
+  display: flex; align-items: center; gap: 12px;
+  margin: 22px 0 14px; color: var(--fg-faint); font-size: 11.5px;
+  text-transform: uppercase; letter-spacing: .07em;
+}
+.round-divider::before, .round-divider::after {
+  content: ''; flex: 1; height: 1px; background: var(--line);
+}
+
+.avatar {
+  border-radius: 50%; color: #fff; display: grid; place-items: center;
+  font-weight: 600; flex: none; user-select: none;
+}
+
+.msg { display: flex; gap: 10px; padding: 9px 0; }
+.msg-main { min-width: 0; flex: 1; }
+.msg-head { display: flex; align-items: baseline; gap: 8px; font-size: 12px; }
+.msg-name { font-weight: 600; font-size: 13.5px; }
+.msg-brain, .msg-round, .msg-time { color: var(--fg-faint); }
+.msg-reply {
+  margin-left: auto; border: 0; background: transparent;
+  color: var(--fg-faint); opacity: 0; padding: 0 4px;
+}
+.msg:hover .msg-reply { opacity: 1; }
+.msg-body { margin-top: 2px; }
+.msg.flash { background: color-mix(in srgb, var(--accent) 12%, transparent); border-radius: 8px; }
+
+.quote {
+  display: block; width: 100%; text-align: left; margin: 5px 0 6px;
+  border: 0; border-left: 3px solid var(--line); background: var(--bg-sunken);
+  border-radius: 0 7px 7px 0; padding: 6px 10px; font-size: 12.5px;
+}
+.quote:hover { border-left-color: var(--accent); }
+.quote-name { display: block; font-weight: 600; font-size: 12px; }
+.quote-body { color: var(--fg-dim); }
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.chip {
+  font-size: 11px; padding: 1px 7px; border-radius: 20px;
+  border: 1px solid var(--line); color: var(--fg-dim); background: var(--bg-alt);
+  font-family: var(--mono);
+}
+.chip-computed { border-color: #3fa87a; color: #3fa87a; }
+.chip-sourced { border-color: var(--accent); color: var(--accent); }
+.chip-recalled { border-color: #9b6dd6; color: #9b6dd6; }
+.chip-degraded, .chip-priority { border-color: var(--danger); color: var(--danger); }
+.chip-sealed { border-color: #d68c3f; color: #d68c3f; }
+.chip-count { cursor: help; }
+
+.system-note, .sealed-note {
+  color: var(--fg-faint); font-size: 12.5px; text-align: center;
+  padding: 10px 40px; font-style: italic;
+}
+
+/* ---------- markdown ---------- */
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+.md p { margin: 0 0 8px; line-height: 1.55; }
+.md ul, .md ol { margin: 0 0 8px; padding-left: 22px; }
+.md li { margin: 2px 0; line-height: 1.5; }
+.md code {
+  font-family: var(--mono); font-size: 12.5px;
+  background: var(--bg-sunken); padding: 1px 4px; border-radius: 4px;
+}
+.md pre {
+  background: var(--bg-sunken); padding: 10px 12px; border-radius: 8px;
+  overflow-x: auto; margin: 0 0 8px;
+}
+.md pre code { background: none; padding: 0; }
+.md blockquote {
+  margin: 0 0 8px; padding-left: 12px;
+  border-left: 3px solid var(--line); color: var(--fg-dim);
+}
+.md table { border-collapse: collapse; margin-bottom: 8px; display: block; overflow-x: auto; }
+.md th, .md td { border: 1px solid var(--line); padding: 4px 8px; }
+.md a { color: var(--accent); }
+
+/* ---------- composer ---------- */
+.composer {
+  display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap;
+  padding: 12px 20px 16px; border-top: 1px solid var(--line); background: var(--bg-alt);
+  flex: none;
+}
+.composer textarea {
+  flex: 1; min-width: 240px; font: inherit; resize: vertical;
+  padding: 9px 11px; border-radius: 9px; border: 1px solid var(--line);
+  background: var(--bg); color: var(--fg);
+}
+.composer-reply {
+  flex-basis: 100%; display: flex; gap: 8px; align-items: center;
+  font-size: 12px; color: var(--fg-dim);
+}
+.composer-reply button { border: 0; background: transparent; color: var(--fg-faint); }
+
+.error-toast {
+  position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%);
+  background: var(--danger); color: #fff; padding: 8px 16px;
+  border-radius: 8px; font-size: 13px; cursor: pointer;
+}
+
+/* ---------- start sheet ---------- */
+.sheet-backdrop {
+  position: fixed; inset: 0; background: rgba(0,0,0,.35);
+  display: grid; place-items: center; z-index: 20;
+}
+.sheet {
+  background: var(--bg); border-radius: 14px; padding: 20px 22px;
+  width: min(520px, 92vw); max-height: 88vh; overflow-y: auto;
+  box-shadow: 0 18px 50px rgba(0,0,0,.3);
+}
+.sheet h2 { margin: 0 0 14px; font-size: 16px; }
+.field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 14px; }
+.field > span { font-size: 12.5px; font-weight: 600; }
+.field small { color: var(--fg-faint); font-size: 12px; }
+.field textarea, .field select {
+  font: inherit; padding: 8px 10px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--bg); color: var(--fg); resize: vertical;
+}
+.radios { display: flex; gap: 16px; font-size: 13px; }
+.radios label, .check { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.cast { display: flex; flex-wrap: wrap; gap: 8px; }
+.cast-chip {
+  display: flex; align-items: center; gap: 6px; font-size: 12.5px;
+  background: var(--bg-alt); border-radius: 20px; padding: 3px 10px 3px 3px;
+}
+.cast-chip small { color: var(--fg-faint); }
+.sheet-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin-top: 6px; flex-wrap: wrap;
+}
+.estimate { color: var(--fg-faint); font-size: 12px; }
+.sheet-foot > div { display: flex; gap: 8px; }
+.sheet-foot button:not(.primary) {
+  border: 1px solid var(--line); background: var(--bg);
+  padding: 6px 14px; border-radius: 7px;
+}
+
+/* ---------- sprint 4: conversation ergonomics ---------- */
+
+/*
+ * LaTeX-preserving copy is done in lib/mathcopy.ts, not here: Range.toString()
+ * ignores `user-select`, so no CSS rule can change what ⌘C actually yields.
+ */
+/* Message text must be selectable across bubbles; chrome must not be. */
+.msg-body, .md { user-select: text; }
+.msg-head, .chips, .quote-name, .cb-agent, .room-item, .agent-item { user-select: none; }
+
+.selbar {
+  position: fixed; transform: translate(-50%, -100%);
+  display: flex; gap: 2px; z-index: 40;
+  background: var(--fg); border-radius: 8px; padding: 3px;
+  box-shadow: 0 6px 20px rgba(0,0,0,.35);
+}
+.selbar button {
+  border: 0; background: transparent; color: var(--bg);
+  font-size: 12px; padding: 4px 9px; border-radius: 6px; white-space: nowrap;
+}
+.selbar button:hover { background: rgba(127,127,127,.35); }
+
+.searchbar {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 20px; border-bottom: 1px solid var(--line); background: var(--bg-alt);
+  flex: none;
+}
+.searchbar input {
+  flex: 1; font: inherit; padding: 5px 10px; border-radius: 7px;
+  border: 1px solid var(--line); background: var(--bg); color: var(--fg);
+}
+.search-count { color: var(--fg-faint); font-size: 12px; min-width: 74px; text-align: right; }
+.searchbar button {
+  border: 1px solid var(--line); background: var(--bg);
+  border-radius: 6px; padding: 3px 9px; font-size: 12px;
+}
+.searchbar button:disabled { opacity: .4; cursor: default; }
+
+.md mark {
+  background: color-mix(in srgb, #d68c3f 45%, transparent);
+  color: inherit; border-radius: 2px; padding: 0 1px;
+}
+.msg.hit { background: color-mix(in srgb, var(--accent) 9%, transparent); border-radius: 8px; }
+
+.ctxmenu {
+  position: fixed; z-index: 50; min-width: 200px;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 9px;
+  padding: 4px; box-shadow: 0 12px 34px rgba(0,0,0,.28);
+}
+.ctxmenu button {
+  display: block; width: 100%; text-align: left; border: 0;
+  background: transparent; padding: 6px 10px; border-radius: 6px; font-size: 13px;
+}
+.ctxmenu button:hover { background: var(--bg-sunken); }
+.ctxmenu button.danger { color: var(--danger); }
+
+.palette {
+  background: var(--bg); border-radius: 12px; width: min(560px, 92vw);
+  box-shadow: 0 18px 50px rgba(0,0,0,.3); overflow: hidden;
+  align-self: start; margin-top: 14vh;
+}
+.palette input {
+  width: 100%; border: 0; border-bottom: 1px solid var(--line);
+  padding: 13px 16px; font: inherit; font-size: 15px;
+  background: transparent; color: var(--fg); outline: none;
+}
+.palette-list { max-height: 340px; overflow-y: auto; padding: 5px; }
+.palette-list button {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+  width: 100%; text-align: left; border: 0; background: transparent;
+  padding: 7px 11px; border-radius: 7px; font-size: 13.5px;
+}
+.palette-list button.sel { background: var(--accent); color: #fff; }
+.palette-list button.sel small { color: rgba(255,255,255,.75); }
+.palette-list small { color: var(--fg-faint); font-size: 11.5px; }
+.palette-empty { padding: 14px 16px; color: var(--fg-faint); font-size: 13px; }
+
+.toast {
+  position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%);
+  background: var(--fg); color: var(--bg); padding: 7px 15px;
+  border-radius: 8px; font-size: 13px; z-index: 60;
+}
+
+/* ---------- sprints 5–7: inspector, results, memory ---------- */
+
+.app.with-inspector { grid-template-columns: 232px 1fr 300px; }
+
+.pane-right {
+  border-left: 1px solid var(--line); background: var(--bg-alt);
+  display: flex; flex-direction: column; min-width: 0;
+  /* Clears the macOS title bar, same as the other columns. */
+  padding-top: var(--titlebar);
+}
+.tabs { display: flex; border-bottom: 1px solid var(--line); flex: none; }
+.tabs button {
+  flex: 1; border: 0; background: transparent; padding: 9px 4px;
+  font-size: 11.5px; color: var(--fg-dim); border-bottom: 2px solid transparent;
+}
+.tabs button.sel { color: var(--fg); border-bottom-color: var(--accent); font-weight: 600; }
+.badge {
+  background: var(--danger); color: #fff; border-radius: 9px;
+  padding: 0 5px; font-size: 10px; margin-left: 3px;
+}
+.tab-body { flex: 1; min-height: 0; overflow-y: auto; padding: 12px; }
+.tab-empty, .muted { color: var(--fg-faint); font-size: 12.5px; line-height: 1.5; }
+.inbox-note { margin: 0 0 10px; }
+
+.pos { border-bottom: 1px solid var(--line); padding-bottom: 12px; margin-bottom: 12px; }
+.pos-head { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.pos-label {
+  font-family: var(--mono); font-weight: 700; font-size: 12px; color: var(--accent);
+}
+.pos-title { font-weight: 600; font-size: 13px; }
+.pos-text { font-size: 12.5px; color: var(--fg-dim); margin: 5px 0; line-height: 1.45; }
+.pos-stances { display: flex; flex-direction: column; gap: 3px; margin-top: 6px; }
+.stance { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.stance-op { margin-left: auto; font-family: var(--mono); }
+.stance-oppose .stance-op { color: var(--danger); }
+.stance-endorse .stance-op, .stance-assert .stance-op { color: #3fa87a; }
+.stance-unsure { opacity: .7; }
+.linkish {
+  border: 0; background: transparent; color: var(--accent);
+  font-size: 11.5px; padding: 4px 0;
+}
+
+.src { border-bottom: 1px solid var(--line); padding-bottom: 10px; margin-bottom: 10px; font-size: 12.5px; }
+.src a { display: block; color: var(--accent); word-break: break-all; font-size: 11.5px; }
+
+.memcard {
+  border: 1px solid var(--line); border-radius: 9px;
+  padding: 9px 10px; margin-bottom: 9px; background: var(--bg);
+}
+.memcard-head { display: flex; align-items: center; gap: 6px; font-size: 12px; margin-bottom: 5px; }
+.memcard p { margin: 0 0 8px; font-size: 12.5px; line-height: 1.45; }
+.memcard-actions { display: flex; gap: 8px; align-items: center; }
+.memcard-actions button:first-child {
+  border: 1px solid var(--line); background: var(--bg-sunken);
+  border-radius: 6px; padding: 3px 12px; font-size: 12px;
+}
+
+.log-actions { display: flex; gap: 12px; margin-bottom: 10px; font-size: 12px; }
+.log-actions a { color: var(--accent); }
+.logline {
+  display: flex; gap: 7px; font-size: 11px; font-family: var(--mono);
+  padding: 2px 0; color: var(--fg-dim);
+}
+.log-time { color: var(--fg-faint); }
+.log-type { color: var(--fg); }
+.log-agent { margin-left: auto; color: var(--fg-faint); }
+
+/* Result cards. "Two positions remain" and "conclave failed" are results, not
+   errors, and are styled as such — only an explicit failure gets a warm edge. */
+.resultcard {
+  border: 1px solid var(--line); border-left: 3px solid var(--accent);
+  border-radius: 10px; margin: 18px 0; background: var(--bg-alt); overflow: hidden;
+}
+.resultcard.tone-good { border-left-color: #3fa87a; }
+.resultcard.tone-warn { border-left-color: #d68c3f; }
+.result-head {
+  display: flex; align-items: baseline; gap: 10px; width: 100%;
+  border: 0; background: transparent; padding: 11px 14px; text-align: left;
+}
+.result-kicker {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--fg-faint);
+}
+.result-level { font-weight: 600; font-size: 14px; }
+.result-toggle { margin-left: auto; color: var(--fg-faint); }
+.result-body { padding: 0 14px 14px; }
+.result-fail {
+  background: color-mix(in srgb, #d68c3f 16%, transparent);
+  border-radius: 7px; padding: 8px 10px; font-size: 13px; margin: 0 0 12px;
+}
+.result-section { margin-bottom: 12px; }
+.result-section h4 {
+  margin: 0 0 4px; font-size: 11px; text-transform: uppercase;
+  letter-spacing: .06em; color: var(--fg-faint); font-weight: 600;
+}
+.result-section ul { margin: 0; padding-left: 20px; font-size: 13px; line-height: 1.5; }
+.result-section li { margin: 3px 0; }
+.result-actions { display: flex; gap: 8px; }
+.result-actions button {
+  border: 1px solid var(--line); background: var(--bg);
+  border-radius: 7px; padding: 4px 12px; font-size: 12px;
+}
+
+/*
+ * The transcript is the product; the side panes are accessories. Below these
+ * widths a three-column grid squeezes the middle to ~270px and the room becomes
+ * unreadable, so the accessories drop out rather than the content.
+ */
+@media (max-width: 1180px) {
+  .app.with-inspector { grid-template-columns: 232px 1fr; }
+  .pane-right { display: none; }
+}
+@media (max-width: 860px) {
+  .app, .app.with-inspector { grid-template-columns: 1fr; }
+  .pane-left { display: none; }
+}
+.pane-main { min-width: 0; }
+
+/* ---------- sprint 8: global search, persona lab ---------- */
+
+.gsearch, .lab {
+  background: var(--bg); border-radius: 12px; width: min(680px, 94vw);
+  box-shadow: 0 18px 50px rgba(0,0,0,.3); overflow: hidden;
+  align-self: start; margin-top: 10vh; max-height: 80vh;
+  display: flex; flex-direction: column;
+}
+.gsearch input {
+  width: 100%; border: 0; border-bottom: 1px solid var(--line);
+  padding: 13px 16px; font: inherit; font-size: 15px;
+  background: transparent; color: var(--fg); outline: none;
+}
+.gsearch-status {
+  padding: 7px 16px; font-size: 11.5px; color: var(--fg-faint);
+  border-bottom: 1px solid var(--line); background: var(--bg-alt);
+}
+.gsearch-body { overflow-y: auto; padding: 8px; }
+.gsearch-body h4 {
+  margin: 10px 8px 4px; font-size: 10.5px; text-transform: uppercase;
+  letter-spacing: .07em; color: var(--fg-faint);
+}
+.hitrow {
+  display: block; width: 100%; text-align: left; border: 0;
+  background: transparent; padding: 7px 10px; border-radius: 8px;
+}
+.hitrow:hover { background: var(--bg-sunken); }
+.hitrow-meta { display: flex; gap: 8px; font-size: 11px; margin-bottom: 2px; }
+.hitrow-room { color: var(--accent); font-weight: 600; }
+.hitrow-snippet {
+  font-size: 12.5px; color: var(--fg-dim); line-height: 1.4;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+
+.lab-body { overflow-y: auto; padding: 16px 18px; }
+.lab-body .field input {
+  font: inherit; padding: 8px 10px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--bg); color: var(--fg);
+}
+.chipgrid { display: flex; flex-wrap: wrap; gap: 6px; }
+.pchip {
+  border: 1px solid var(--line); background: var(--bg);
+  border-radius: 20px; padding: 4px 12px; font-size: 12.5px;
+}
+.pchip.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.lab-obs {
+  background: var(--bg-alt); border-radius: 9px; padding: 10px 13px; margin: 16px 0;
+}
+.lab-obs p { margin: 0 0 6px; font-size: 13px; line-height: 1.5; }
+.lab-obs p:last-child { margin: 0; }
+.lab-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.lab-arm { border: 1px solid var(--line); border-radius: 10px; padding: 11px 12px; }
+.lab-arm-name {
+  border: 0; background: transparent; padding: 0; font-weight: 600;
+  font-size: 13px; color: var(--accent); text-align: left;
+}
+.lab-level { font-size: 12px; color: var(--fg-dim); margin: 3px 0 8px; }
+.lab-arm dl {
+  display: grid; grid-template-columns: auto 1fr; gap: 2px 10px;
+  margin: 0; font-size: 11.5px;
+}
+.lab-arm dt { color: var(--fg-faint); }
+.lab-arm dd { margin: 0; }
+.lab-pos { margin: 8px 0 0; padding-left: 16px; font-size: 11.5px; line-height: 1.5; }
+@media (max-width: 620px) { .lab-grid { grid-template-columns: 1fr; } }
+
+/* ---------- agent + room editors ---------- */
+
+/* The inspector toggle used to be an unstyled <button>, which on a dark theme
+   renders as a small white box that looks like a rendering bug rather than a
+   control. Header buttons need an explicit look. */
+.room-actions button.ghost {
+  border: 1px solid var(--line); background: var(--bg); color: var(--fg);
+  padding: 5px 12px; border-radius: 7px; font-size: 12.5px;
+}
+.room-actions button.ghost:hover { background: var(--bg-sunken); }
+.room-actions button.ghost.icon {
+  padding: 5px 9px; color: var(--fg-faint); font-size: 13px; line-height: 1;
+}
+
+.pane-title { display: flex; align-items: center; justify-content: space-between; }
+.pane-add {
+  border: 0; background: transparent; color: var(--fg-faint);
+  font-size: 15px; line-height: 1; padding: 0 4px; border-radius: 5px;
+}
+.pane-add:hover { background: var(--bg-sunken); color: var(--fg); }
+
+button.agent-item {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  text-align: left; border: 0; background: transparent; border-radius: 7px;
+}
+button.agent-item:hover { background: var(--bg-sunken); }
+
+.ae-head { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+.ae-colors { display: flex; flex-wrap: wrap; gap: 6px; }
+.swatch {
+  width: 20px; height: 20px; border-radius: 50%; border: 2px solid transparent;
+}
+.swatch.on { border-color: var(--fg); }
+
+.field input {
+  font: inherit; padding: 8px 10px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--bg); color: var(--fg);
+}
+.ae-contract {
+  margin: 0; padding: 9px 11px; background: var(--bg-sunken);
+  border-radius: 8px; font-size: 12px; line-height: 1.5;
+  white-space: pre-wrap; font-family: var(--font); color: var(--fg-dim);
+  max-height: 150px; overflow-y: auto;
+}
+
+.castpick {
+  display: flex; flex-direction: column; gap: 2px;
+  max-height: 240px; overflow-y: auto;
+  border: 1px solid var(--line); border-radius: 9px; padding: 5px;
+}
+.castrow {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  text-align: left; border: 0; background: transparent;
+  padding: 5px 8px; border-radius: 7px; font-size: 13px;
+}
+.castrow:hover { background: var(--bg-sunken); }
+.castrow.on { background: color-mix(in srgb, var(--accent) 20%, transparent); }
+.castrow-name { font-weight: 500; }
+.castrow small { color: var(--fg-faint); font-size: 11.5px; }
+.castrow-brain { margin-left: auto; font-family: var(--mono); }
+.sheet-foot .foot-left { display: flex; gap: 12px; align-items: center; }
+.linkish.danger { color: var(--danger); }
+.linkish:disabled { opacity: .5; }
+
+/*
+ * Sidebar rows carry their own actions. A visible ⋯ matters more than the
+ * right-click: delete used to live only inside a dialog opened by a button
+ * labelled "Cast", which nobody would read as "and also delete".
+ */
+.room-row { display: flex; align-items: center; border-radius: 7px; }
+.room-row:hover { background: var(--bg-sunken); }
+.room-row.sel { background: var(--accent); }
+.room-row.sel .room-item, .room-row.sel .row-more { color: #fff; }
+.room-row .room-item, .room-row .agent-item { flex: 1; min-width: 0; }
+.room-row .room-item:hover, .room-row .agent-item:hover { background: transparent; }
+.room-row .room-item, .room-row .agent-item {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.row-more {
+  border: 0; background: transparent; color: var(--fg-faint);
+  padding: 2px 7px; border-radius: 5px; font-size: 14px; line-height: 1;
+  opacity: 0; flex: none;
+}
+.room-row:hover .row-more { opacity: 1; }
+.row-more:hover { background: rgba(127,127,127,.25); color: var(--fg); }
+
+.ask {
+  background: var(--bg); border-radius: 12px; padding: 18px 20px;
+  width: min(420px, 92vw); box-shadow: 0 18px 50px rgba(0,0,0,.3);
+  align-self: start; margin-top: 18vh;
+}
+.ask h3 { margin: 0 0 6px; font-size: 15px; }
+.ask-detail { margin: 0 0 12px; font-size: 13px; color: var(--fg-dim); line-height: 1.5; }
+.ask input {
+  width: 100%; font: inherit; padding: 8px 10px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--bg); color: var(--fg);
+  margin-bottom: 14px;
+}
+.ask-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.ask-actions button:not(.primary) {
+  border: 1px solid var(--line); background: var(--bg);
+  padding: 6px 14px; border-radius: 7px;
+}
+button.primary.danger-btn { background: var(--danger); }
+.foot-note { color: var(--fg-faint); font-size: 11.5px; max-width: 250px; line-height: 1.4; }
+.foot-note.error { color: var(--danger); }
+
+/* ---------- manual ---------- */
+.manual {
+  background: var(--bg); border-radius: 12px;
+  width: min(820px, 94vw); height: min(660px, 86vh);
+  box-shadow: 0 18px 50px rgba(0,0,0,.35);
+  display: flex; flex-direction: column; overflow: hidden; align-self: center;
+}
+.manual-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px; border-bottom: 1px solid var(--line); flex: none;
+}
+.manual-head h2 { margin: 0; font-size: 15px; }
+.manual-body { display: grid; grid-template-columns: 178px 1fr; flex: 1; min-height: 0; }
+.manual-nav {
+  border-right: 1px solid var(--line); padding: 10px 8px;
+  overflow-y: auto; background: var(--bg-alt);
+}
+.manual-nav button {
+  display: block; width: 100%; text-align: left; border: 0;
+  background: transparent; color: var(--fg-dim);
+  padding: 7px 10px; border-radius: 7px; font-size: 13px;
+}
+.manual-nav button:hover { background: var(--bg-sunken); color: var(--fg); }
+.manual-nav button.sel { background: var(--accent); color: #fff; font-weight: 500; }
+.manual-content { overflow-y: auto; padding: 18px 22px 28px; }
+.manual-content h3 {
+  margin: 20px 0 6px; font-size: 13.5px;
+  display: flex; align-items: baseline; gap: 8px;
+}
+.manual-content h3:first-child { margin-top: 0; }
+.manual-content p { margin: 0 0 10px; font-size: 13px; line-height: 1.6; color: var(--fg-dim); }
+.manual-content li { font-size: 13px; line-height: 1.6; color: var(--fg-dim); margin: 3px 0; }
+.manual-content ul, .manual-content ol { margin: 0 0 10px; padding-left: 20px; }
+.manual-content code {
+  font-family: var(--mono); font-size: 12px;
+  background: var(--bg-sunken); padding: 1px 5px; border-radius: 4px;
+}
+.manual-lede { font-size: 13.5px !important; color: var(--fg) !important; }
+.manual-aside { font-size: 12.5px !important; color: var(--fg-faint) !important; }
+.manual-tag {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--fg-faint); border: 1px solid var(--line);
+  border-radius: 20px; padding: 1px 8px; font-weight: 400;
+}
+.manual-mode { border-top: 1px solid var(--line); padding-top: 14px; margin-top: 16px; }
+.manual-mode:first-of-type { border-top: 0; margin-top: 0; padding-top: 0; }
+.manual-dl {
+  display: grid; grid-template-columns: auto 1fr; gap: 5px 14px;
+  margin: 0 0 12px; font-size: 13px; line-height: 1.55;
+}
+.manual-dl dt { font-weight: 600; color: var(--fg); }
+.manual-dl dd { margin: 0; color: var(--fg-dim); }
+.manual-dl.keys dt { font-family: var(--mono); font-size: 12px; white-space: nowrap; }
+.manual-note {
+  background: var(--bg-alt); border-left: 3px solid var(--accent);
+  border-radius: 0 8px 8px 0; padding: 10px 13px;
+  font-size: 12.5px; line-height: 1.55; color: var(--fg-dim); margin: 14px 0;
+}
+.manual-note.warn { border-left-color: #d68c3f; }

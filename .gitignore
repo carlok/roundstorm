@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist-web/
+dist-server/
+src-tauri/target/
+src-tauri/gen/
+
+# Local data: rooms, transcripts, the ledger, memory cards, logs.
+# Never commit this — it is the user's research, and it contains whatever they
+# pasted into a room.
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# Logs
+*.log
+logs/
+
+# Secrets and local overrides
+.env
+.env.*
+!.env.example
+
+# macOS
+.DS_Store
+.AppleDouble
+# NB: the usual `Icon?` line from GitHub's macOS template is deliberately absent.
+# macOS filesystems are case-insensitive, so it silently swallows src-tauri/icons/
+# and the app then builds without an icon — or not at all.
+
+# Editors
+.idea/
+*.swp
+.vscode/*
+!.vscode/extensions.json
