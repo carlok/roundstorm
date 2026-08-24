@@ -159,6 +159,21 @@ could do from a shell in that directory".
 > guarantee is a mode rather than a kernel sandbox, so treat its lower tiers as
 > advisory and do not point it at a directory you would mind it touching.
 
+## Clearing a room
+
+**Clear room** (in a room's `⋯` menu) removes everything that room produced: the
+messages, the positions ledger, sources, result cards, the search index for it,
+**and the memory cards derived from it — including ones you already accepted into
+an agent's long-term memory.** The room and its cast survive.
+
+That last part is the point. Leaving accepted cards behind would mean an agent
+still remembers a discussion you believe you erased, and quietly carries it into
+the next one.
+
+**Delete room** does the same and removes the room as well.
+
+Neither is undoable, and both refuse while a deliberation is running.
+
 ## Shortcuts
 
 | | |

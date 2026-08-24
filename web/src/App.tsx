@@ -156,16 +156,18 @@ export function App() {
       { label: 'Edit cast…', onSelect: () => setRoomSheet({ room }) },
       { label: `Export ${room.kind === 'dm' ? 'chat' : 'room'} as Markdown`,
         onSelect: () => { window.open(apiUrl(`/api/rooms/${room.id}/export?format=markdown`), '_blank') } },
-      { label: 'Clear transcript…', danger: true, onSelect: () => setAsk({
+      { label: 'Clear room — messages and memory…', danger: true, onSelect: () => setAsk({
         title: `Clear “${room.name}”?`,
         detail: 'Deletes the messages, positions, sources, results and everything the agents remembered from this room — including memory cards you already accepted. The room and its cast stay.',
         confirmLabel: 'Clear', danger: true,
         onConfirm: async () => {
           const res = await fetch(apiUrl(`/api/rooms/${room.id}/messages`), { method: 'DELETE' })
-          if (!res.ok) {
-            const { error } = await res.json().catch(() => ({ error: 'could not clear' }))
-            return flash(error)
-          }
+          const body = await res.json().catch(() => ({ error: 'could not clear' }))
+          if (!res.ok) return flash(body.error)
+          // Say what actually went, so "did that clear the memory too?" is
+          // answered by the app rather than by reading the source.
+          flash(`Cleared ${body.messages} message${body.messages === 1 ? '' : 's'}`
+            + ` and ${body.memoryCards} memory card${body.memoryCards === 1 ? '' : 's'}`)
           if (rs.roomId === room.id) await rs.reload()
           await rs.refreshBoot()
         },

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-type Section = 'start' | 'modes' | 'rounds' | 'reading' | 'access' | 'keys'
+type Section = 'start' | 'modes' | 'rounds' | 'reading' | 'access' | 'clearing' | 'keys'
 
 /**
  * The in-app manual.
@@ -29,6 +29,7 @@ export function Manual({ onClose }: { onClose: () => void }) {
               ['rounds', 'Rounds & styles'],
               ['reading', 'Reading a discussion'],
               ['access', 'What agents may do'],
+              ['clearing', 'Clearing a room'],
               ['keys', 'Shortcuts'],
             ] as [Section, string][]).map(([k, label]) => (
               <button key={k} className={tab === k ? 'sel' : ''} onClick={() => setTab(k)}>
@@ -43,6 +44,7 @@ export function Manual({ onClose }: { onClose: () => void }) {
             {tab === 'rounds' && <Rounds />}
             {tab === 'reading' && <Reading />}
             {tab === 'access' && <Access />}
+            {tab === 'clearing' && <Clearing />}
             {tab === 'keys' && <Keys />}
           </div>
         </div>
@@ -255,6 +257,26 @@ const Access = () => (
       guarantee is a mode rather than a kernel sandbox, so treat its lower tiers as
       advisory and do not point it at a directory you would mind it touching.
     </div>
+  </>
+)
+
+const Clearing = () => (
+  <>
+    <h3>Clear room</h3>
+    <p>
+      In a room's <code>⋯</code> menu. Removes everything that room produced: the
+      messages, the positions ledger, sources, result cards, its search index, and
+      the memory cards derived from it — <b>including ones you already accepted
+      into an agent's long-term memory</b>. The room and its cast survive.
+    </p>
+    <p className="manual-aside">
+      That last part matters: leaving accepted cards behind would mean an agent
+      still remembers a discussion you believe you erased, and carries it quietly
+      into the next one.
+    </p>
+    <h3>Delete room</h3>
+    <p>The same, and the room goes too.</p>
+    <p>Neither is undoable, and both refuse while a deliberation is running.</p>
   </>
 )
 
