@@ -6,9 +6,10 @@ an ordinary group chat.
 
 You write the question once. They do the arguing.
 
-Design proposal: `~/.claude/plans/roundstorm-design-brief-starry-avalanche.md`.
+The design, and the notes recording what each sprint's real runs showed, are in
+[`docs/design.md`](docs/design.md).
 
-## Status — sprints 0–2 complete
+## Status
 
 | Sprint | Scope | State |
 |---|---|---|
@@ -20,7 +21,6 @@ Design proposal: `~/.claude/plans/roundstorm-design-brief-starry-avalanche.md`.
 | 5 | Positions ledger, all six modes, steering, @mentions, interrupt-now | done |
 | 6 | Conclave, synthesis, result cards, export | done |
 | 7 | Memory inbox, sources, activity log, global search, side rooms | done |
-
 | 8 | Tauri app, persona lab, local brains, semantic search | done |
 
 **The MVP is complete and packaged.**
@@ -276,3 +276,13 @@ server/src/
     dm.ts               direct messages
 web/src/                React UI
 ```
+
+## Licence
+
+Not yet chosen, so for now this is **all rights reserved** — the default when a
+repository carries no licence. That is fine while it is private; it has to be
+settled before the repo is made public, since without a licence nobody may
+legally use, copy or modify it.
+
+No dependency constrains the choice: every runtime dependency is MIT, and there
+is no copyleft anywhere in the tree.
