@@ -16,10 +16,12 @@ const TIERS: { key: Tier; label: string }[] = [
  * Also used to edit an existing room's cast, because "add Noether to this" is a
  * thing you decide two rounds in, not up front.
  */
-export function RoomEditor({ room, agents, projectId, onClose, onSaved }: {
+export function RoomEditor({ room, agents, projectId, projectWorkingDir, onClose, onSaved }: {
   room: Room | null
   agents: Agent[]
   projectId: string
+  /** Project-wide, but surfaced here because this is where the tier is chosen. */
+  projectWorkingDir: string | null
   onClose: () => void
   onSaved: (roomId?: string) => void
 }) {
@@ -35,6 +37,13 @@ export function RoomEditor({ room, agents, projectId, onClose, onSaved }: {
   const save = async () => {
     if (!name.trim() || !picked.length) return
     setBusy(true)
+    // Working directory is project-wide; save it whenever it changed.
+    if ((workDir.trim() || null) !== (projectWorkingDir ?? null)) {
+      await api(`/api/projects/${projectId}`, {
+        method: 'PATCH', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workingDir: workDir.trim() || null }),
+      })
+    }
     if (room) {
       await api(`/api/rooms/${room.id}`, {
         method: 'PATCH', headers: { 'content-type': 'application/json' },
@@ -57,6 +66,12 @@ export function RoomEditor({ room, agents, projectId, onClose, onSaved }: {
   }
 
   const [failed, setFailed] = useState<string | null>(null)
+  const [workDir, setWorkDir] = useState(projectWorkingDir ?? '')
+
+  // The file tiers are refused without a directory, so say so before the user
+  // saves rather than letting a run silently downgrade itself.
+  const needsDir = tier === 'workstation' || tier === 'full'
+  const missingDir = needsDir && !workDir.trim()
 
   /** Two-step, for the same reason as in the agent editor. */
   const remove = async () => {
@@ -122,6 +137,22 @@ export function RoomEditor({ room, agents, projectId, onClose, onSaved }: {
           <small>Each researcher is still capped by its own ceiling.</small>
         </label>
 
+        {needsDir && (
+          <label className="field">
+            <span>Working directory</span>
+            <input value={workDir} onChange={e => setWorkDir(e.target.value)}
+                   placeholder="/Users/you/research/rotor-study" spellCheck={false} />
+            <small>
+              {missingDir
+                ? 'Required. Reading and writing are refused without one, and the room falls back to Research — with no directory the CLI would run wherever the daemon happens to be.'
+                : tier === 'full'
+                  ? 'Agents may write files and run commands here. Point it somewhere you would not mind a shell being opened.'
+                  : 'Agents may read files here. No writes.'}
+            </small>
+            <small className="field-aside">Applies to the whole project, not just this room.</small>
+          </label>
+        )}
+
         <div className="sheet-foot">
           <div className="foot-left">
             {room && (
@@ -141,7 +172,7 @@ export function RoomEditor({ room, agents, projectId, onClose, onSaved }: {
           <div>
             <button onClick={onClose}>Cancel</button>
             <button className="primary"
-                    disabled={busy || !picked.length || !name.trim()}
+                    disabled={busy || !picked.length || !name.trim() || missingDir}
                     onClick={save}>
               {room ? 'Save' : 'Create room'}
             </button>

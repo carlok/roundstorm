@@ -732,3 +732,4 @@ button.primary.danger-btn { background: var(--danger); }
   font-size: 12.5px; line-height: 1.55; color: var(--fg-dim); margin: 14px 0;
 }
 .manual-note.warn { border-left-color: #d68c3f; }
+.field-aside { color: var(--fg-faint) !important; font-style: italic; }

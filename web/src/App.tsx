@@ -510,6 +510,7 @@ export function App() {
         <RoomEditor
           room={roomSheet.room} agents={rs.boot.agents}
           projectId={rs.boot.projects[0]?.id ?? ''}
+          projectWorkingDir={rs.boot.projects[0]?.workingDir ?? null}
           onClose={() => setRoomSheet(null)}
           onSaved={async id => { await rs.refreshBoot(); if (id) rs.setRoomId(id) }}
         />

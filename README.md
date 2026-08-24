@@ -97,9 +97,27 @@ removing the one native dependency (`better-sqlite3`); Node's built-in
 `node:sqlite` would do it, but it is still flagged experimental.
 
 ```bash
-npm test        # contract + context isolation tests
+npm test          # 71 tests
+npm run coverage  # the same, with a coverage report
 npm run typecheck
 ```
+
+Coverage sits around **65% of lines, 83% of branches** overall, and that average
+is not the interesting number. The split is deliberate:
+
+| Area | Lines | Why |
+|---|---|---|
+| `deliberation/contract.ts` | 88% | Parsing what a brain returns. Every degradation path is a test. |
+| `deliberation/ledger.ts` | 88% | The consensus level is computed here; a wrong answer is silent. |
+| `deliberation/conclave.ts` | 89% | Unanimity, endorsement expiry, the cap. |
+| `deliberation/context.ts` | 93% | Round isolation is asserted against the composed prompt. |
+| `db.ts` | 88% | |
+| `adapters/*.ts` | 20–35% | Each one is a subprocess and a JSON translation. Their real failures — a stub PATH, a rejected flag, a schema dialect — are found by running the CLI, not by mocking it. |
+| `scheduler.ts`, `synthesis.ts` | 17–22% | Orchestration over live model calls. The parts worth asserting (workspace scoping, round isolation) are extracted and tested; the loops around them were verified by running them. |
+
+The rule applied throughout: **test the things that fail silently.** A wrong
+consensus level or a lost claim looks like a working product. A broken adapter
+announces itself on the first turn.
 
 ## Requirements
 

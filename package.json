@@ -16,12 +16,13 @@
     "dev:web": "vite",
     "build:web": "vite build",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test server/src/**/*.test.ts",
+    "test": "tsx --test server/src/deliberation/*.test.ts server/src/adapters/*.test.ts web/src/lib/*.test.ts",
     "build:server": "node scripts/build-server.mjs",
     "build": "npm run build:web && npm run build:server",
     "tauri": "tauri",
     "app:dev": "tauri dev",
-    "app:build": "npm run build && tauri build"
+    "app:build": "npm run build && tauri build",
+    "coverage": "tsx --test --experimental-test-coverage server/src/deliberation/*.test.ts server/src/adapters/*.test.ts web/src/lib/*.test.ts"
   },
   "dependencies": {
     "better-sqlite3": "^11.7.0",
