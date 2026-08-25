@@ -19,11 +19,25 @@ export interface StreamOpts {
 export async function* streamProcess(
   cmd: string, args: string[], signal: AbortSignal, opts: StreamOpts,
 ): AsyncIterable<AdapterEvent> {
-  const child = spawn(cmd, args, {
+  // Resolve to an absolute path. A Finder-launched app inherits almost no PATH,
+  // so a bare name is an ENOENT waiting to happen.
+  const bin = resolveBin(cmd)
+  if (!bin) {
+    yield {
+      type: 'error',
+      message: `${cmd} is not installed, or Roundstorm cannot find it. Looked on PATH plus the usual install locations.`,
+    }
+    return
+  }
+
+  const child = spawn(bin, args, {
     cwd: opts.cwd,
     // stdin must be closed: codex otherwise blocks on "Reading additional input from stdin".
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: opts.env ?? process.env,
+    // MERGE, never replace. An adapter that supplies one variable — codex sets
+    // CODEX_HOME — would otherwise hand the child an environment with no PATH,
+    // and these CLIs shell out to node and git themselves.
+    env: { ...spawnEnv(), ...(opts.env ?? {}) },
   })
 
   const onAbort = () => child.kill('SIGTERM')
