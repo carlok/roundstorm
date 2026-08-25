@@ -286,9 +286,15 @@ const Backup = () => (
   <>
     <h3>Back up everything</h3>
     <p>
-      In <b>Inspector → Activity</b>, or <code>⌘K → Back up everything</code>. You get one
-      SQLite file with every room, transcript, positions ledger, source, memory card
-      and log entry.
+      In <b>Inspector → Activity</b>, or <code>⌘K → Back up everything</code>. One SQLite
+      file with every room, transcript, positions ledger, source, memory card and log
+      entry, written to your Downloads folder — the app tells you the exact path.
+    </p>
+    <p className="manual-aside">
+      Saved directly rather than served as a download: a WKWebView does not handle
+      content-disposition the way a browser does, and following such a link can
+      navigate the app away from its own interface. Scripts can still
+      <code>GET /api/backup</code> for the bytes.
     </p>
     <p>
       To restore, quit the app and put the file back as

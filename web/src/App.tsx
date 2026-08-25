@@ -221,7 +221,12 @@ export function App() {
       { id: 'gsearch', label: 'Search every room', hint: '⇧⌘F', run: () => setGlobalSearch(true) },
       { id: 'manual', label: 'How Roundstorm works — the manual', hint: '?', run: () => setManual(true) },
       { id: 'backup', label: 'Back up everything…', hint: 'action',
-        run: () => { window.location.href = apiUrl('/api/backup') } },
+        run: async () => {
+          flash('Backing up…')
+          const r = await fetch(apiUrl('/api/backup'), { method: 'POST' })
+          const d = await r.json().catch(() => ({}))
+          flash(r.ok ? `Saved to ${d.path}` : d.error ?? 'Backup failed')
+        } },
       { id: 'lab', label: 'Persona lab — compare brains', hint: 'experiment', run: () => setLab(true) },
       { id: 'new-room', label: 'New room…', hint: 'action', run: () => setRoomSheet({ room: null }) },
       { id: 'new-agent', label: 'New researcher…', hint: 'action', run: () => setAgentSheet({ agent: null }) },

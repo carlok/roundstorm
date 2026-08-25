@@ -1,7 +1,7 @@
 import express from 'express'
-import { createReadStream, rmSync, statSync } from 'node:fs'
+import { createReadStream, mkdirSync, rmSync, statSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import * as db from './db.ts'
 import { bus } from './bus.ts'
@@ -162,6 +162,32 @@ export function makeApi() {
    * writes live in the -wal, which is routinely larger than the .db, so a plain
    * copy produces a stale snapshot that opens fine and quietly lacks recent work.
    */
+  /**
+   * Write a snapshot straight to disk and report where it went.
+   *
+   * The GET below streams the same bytes, which is right for scripts. The
+   * desktop shell needs this instead: a WKWebView does not handle a
+   * content-disposition download the way a browser does, and following that link
+   * can navigate the app's own window away from the UI. Saving server-side works
+   * identically in the app, in a browser and from curl, and needs no save dialog.
+   */
+  api.post('/backup', async (req, res) => {
+    const dir = typeof req.body?.dir === 'string' && req.body.dir.trim()
+      ? req.body.dir.trim()
+      : join(homedir(), 'Downloads')
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
+    const path = join(dir, `roundstorm-${stamp}.db`)
+    try {
+      mkdirSync(dir, { recursive: true })
+      await db.db.backup(path)
+      const bytes = statSync(path).size
+      db.logEvent('backup.created', { payload: { path, bytes } })
+      res.json({ ok: true, path, bytes })
+    } catch (err) {
+      res.status(500).json({ error: `backup failed: ${String(err)}` })
+    }
+  })
+
   api.get('/backup', async (_req, res) => {
     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
     const name = `roundstorm-${stamp}.db`

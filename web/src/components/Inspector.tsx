@@ -25,6 +25,24 @@ export function Inspector({ positions, sources, roster, roomId, agentById, onCit
   const [tab, setTab] = useState<Tab>('positions')
   const [memory, setMemory] = useState<MemoryCard[]>([])
   const [events, setEvents] = useState<LogEntry[]>([])
+  const [backingUp, setBackingUp] = useState(false)
+  const [backupResult, setBackupResult] = useState<string | null>(null)
+
+  const backup = async () => {
+    setBackingUp(true)
+    setBackupResult(null)
+    try {
+      const r = await api('/api/backup', { method: 'POST' })
+      const d = await r.json()
+      setBackupResult(r.ok
+        ? `Saved ${(d.bytes / 1024).toFixed(0)} KB to ${d.path}`
+        : d.error ?? 'Backup failed')
+    } catch (e) {
+      setBackupResult(`Backup failed: ${String(e)}`)
+    } finally {
+      setBackingUp(false)
+    }
+  }
 
   const loadMemory = () => {
     void api('/api/memory?status=proposed').then(r => r.json())
@@ -137,15 +155,17 @@ export function Inspector({ positions, sources, roster, roomId, agentById, onCit
               </a>
             </div>
             <div className="log-actions">
-              {/* Everything, as one openable SQLite file — the thing to keep if
-                  you keep only one. */}
-              <a className="backup-link" href={apiUrl('/api/backup')}>
-                ⬇ Back up everything
-              </a>
+              {/* Saved server-side rather than downloaded: a WKWebView does not
+                  handle content-disposition the way a browser does, and following
+                  such a link can navigate the app away from its own UI. */}
+              <button className="backup-link" disabled={backingUp} onClick={backup}>
+                {backingUp ? 'Saving…' : '⬇ Back up everything'}
+              </button>
             </div>
+            {backupResult && <p className="backup-done">{backupResult}</p>}
             <p className="muted backup-note">
               A consistent snapshot of every room, transcript, position, source and
-              memory card. Restore by putting it back as
+              memory card, saved to your Downloads folder. Restore by putting it back as
               <code>~/Library/Application Support/Roundstorm/roundstorm.db</code>.
             </p>
             {events.map(e => (

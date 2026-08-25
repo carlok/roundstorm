@@ -176,12 +176,18 @@ Neither is undoable, and both refuse while a deliberation is running.
 
 ## Backing up
 
-**Inspector → Activity → Back up everything** downloads a single SQLite file
-containing every room, transcript, positions ledger, source, memory card and log
-entry. Also on `⌘K → Back up everything`.
+**Inspector → Activity → Back up everything** writes a single SQLite file to your
+Downloads folder containing every room, transcript, positions ledger, source,
+memory card and log entry, and tells you the path. Also on
+`⌘K → Back up everything`.
 
 To restore, quit the app and put the file back as
 `~/Library/Application Support/Roundstorm/roundstorm.db`.
+
+It saves the file directly rather than serving it as a browser download. A
+WKWebView does not handle `content-disposition` the way a browser does, and
+following such a link can navigate the app away from its own interface. Scripts
+that want the bytes can still `GET /api/backup`.
 
 It is a real snapshot, not a file copy. Roundstorm runs SQLite in WAL mode, where
 recent writes live in a separate `-wal` file that is routinely *larger* than the
