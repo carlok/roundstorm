@@ -92,6 +92,9 @@ fn spawn_daemon(entry: &std::path::Path, log_path: &std::path::Path) -> std::io:
     let errlog = log.try_clone()?;
 
     Command::new(&node)
+        // node:sqlite is still flagged experimental and prints a warning on every
+        // launch. It is expected, so it should not look like a fault in the log.
+        .arg("--disable-warning=ExperimentalWarning")
         .arg(entry)
         .env("PORT", PORT)
         // The daemon exits on its own if this process dies without cleaning up

@@ -1,15 +1,12 @@
 /**
- * Bundle the daemon into one JS file for packaging.
+ * Bundle the daemon into one file.
  *
- * better-sqlite3 is a native addon and cannot be bundled, so it stays external
- * and its prebuilt binary is copied alongside. That single native dependency is
- * the only thing standing between this and a self-contained binary; Node's
- * built-in `node:sqlite` would remove it, but it is still flagged experimental
- * and swapping a working storage layer onto an unstable API is not a trade
- * worth making for packaging convenience.
+ * There is nothing to keep external any more: storage is Node's built-in
+ * SQLite, so the whole daemon is pure JavaScript and the output is a single
+ * .mjs with no node_modules beside it.
  */
 import { build } from 'esbuild'
-import { cpSync, mkdirSync, rmSync } from 'node:fs'
+import { mkdirSync, rmSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -26,9 +23,9 @@ await build({
   target: 'node22',
   format: 'esm',
   outfile: join(out, 'index.mjs'),
-  external: ['better-sqlite3'],
-  // Bare ESM cannot use require(); better-sqlite3 is CJS, so give the bundle a
-  // require it can reach.
+  // Express and its dependencies are CommonJS and call require() at runtime.
+  // ESM output has no require, so one has to be provided or the bundle dies on
+  // the first import with 'Dynamic require of "path" is not supported'.
   banner: {
     js: [
       "import { createRequire as __cr } from 'node:module';",
@@ -38,12 +35,4 @@ await build({
   logLevel: 'warning',
 })
 
-// Ship the native dependency next to the bundle.
-mkdirSync(join(out, 'node_modules'), { recursive: true })
-for (const dep of ['better-sqlite3', 'bindings', 'file-uri-to-path', 'prebuild-install']) {
-  try {
-    cpSync(join(root, 'node_modules', dep), join(out, 'node_modules', dep), { recursive: true })
-  } catch { /* optional transitive deps */ }
-}
-
-console.log('daemon bundled to dist-server/index.mjs')
+console.log('daemon bundled to dist-server/index.mjs (no native dependencies)')

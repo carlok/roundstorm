@@ -1,21 +1,21 @@
 /**
- * The same behaviour, asserted against both backends.
+ * The behaviour db.ts relies on, pinned.
  *
- * This is the whole point of the adapter: the choice between a native addon and
- * Node's builtin becomes something a build can decide, rather than a migration.
- * If these pass on both, the swap is a config change.
+ * These started life as a two-backend comparison, which is how better-sqlite3
+ * was removed with confidence. They are worth keeping against the survivor:
+ * node:sqlite is still an experimental API, and these are the exact places it
+ * differed — pragmas, row prototypes, rowid typing, BLOBs — so they are the
+ * first things a Node upgrade would break.
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { openBetterSqlite } from './better.ts'
 import { openNodeSqlite } from './node.ts'
 import type { SqliteDatabase } from './types.ts'
 
 const backends: [string, (p: string) => SqliteDatabase][] = [
-  ['better-sqlite3', openBetterSqlite],
   ['node:sqlite', openNodeSqlite],
 ]
 
@@ -29,7 +29,7 @@ for (const [name, open] of backends) {
 
   test(`${name}: pragmas apply without a dedicated helper`, () => {
     const db = fresh()
-    // node:sqlite has no pragma(); the adapter routes it through exec.
+    // node:sqlite has no pragma() of its own; the adapter routes it through exec.
     const mode = db.prepare('PRAGMA journal_mode').get() as any
     assert.equal(String(mode.journal_mode).toLowerCase(), 'wal')
     db.close()
@@ -50,6 +50,7 @@ for (const [name, open] of backends) {
     const row = db.prepare('SELECT * FROM t').get() as Record<string, unknown>
     // node:sqlite returns null-prototype objects; the adapter normalises them,
     // because `{...row}` and Object.prototype methods behave differently on those.
+    // db.ts spreads rows in several mappers, so this is load-bearing.
     assert.equal(Object.getPrototypeOf(row), Object.prototype)
     assert.deepEqual({ ...row }, { id: 'a', n: 1 })
     db.close()
@@ -59,7 +60,7 @@ for (const [name, open] of backends) {
     const db = fresh()
     db.exec('CREATE TABLE t (id INTEGER PRIMARY KEY AUTOINCREMENT, v TEXT)')
     const r = db.prepare('INSERT INTO t (v) VALUES (?)').run('x')
-    // better-sqlite3 can return a BigInt here; the ledger and event log index on it.
+    // The event log indexes on this and compares ids numerically.
     assert.equal(typeof r.lastInsertRowid, 'number')
     assert.equal(r.lastInsertRowid, 1)
     assert.equal(r.changes, 1)
@@ -89,8 +90,8 @@ for (const [name, open] of backends) {
   })
 
   test(`${name}: FTS5 is available`, () => {
-    // Search is LIKE-based today; FTS5 is the obvious upgrade, so both backends
-    // must support it or the choice would constrain that.
+    // Search is LIKE-based today; FTS5 is the obvious upgrade, so losing it
+    // would be a real constraint.
     const db = fresh()
     db.exec("CREATE VIRTUAL TABLE ft USING fts5(body)")
     db.prepare('INSERT INTO ft (body) VALUES (?)').run('oil whip instability')

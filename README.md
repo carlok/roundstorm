@@ -189,30 +189,25 @@ their mind" is a misleading finding if nobody disagreed in the first place, so
 that case is reported as an experiment-design problem rather than a result about
 the brains.
 
-## Storage backend
+## Storage
 
-The daemon opens SQLite through a small adapter (`server/src/sqlite/`), so the
-implementation is a swap rather than a migration:
+Node's built-in SQLite, reached through a small adapter in `server/src/sqlite/`.
 
-```bash
-npm test                  # both backends, 87 tests
-npm run test:node-sqlite  # the whole suite forced onto node:sqlite
-ROUNDSTORM_SQLITE=node npm run dev:daemon
-```
+**The daemon has no native dependency.** It bundles to a single 1.4 MB
+JavaScript file that runs anywhere Node 22.5+ does, which is what makes a
+multi-platform build tractable — the only per-platform artifact left is the Tauri
+shell itself, and Rust cross-compiles.
 
-| | |
-|---|---|
-| `better-sqlite3` *(default)* | Native addon. Stable. Needs a compiled binary per platform-arch, which is the one thing making a multi-platform build awkward. |
-| `node:sqlite` | Node builtin. No native dependency, so the daemon becomes pure JavaScript. Still flagged experimental, and ships a newer SQLite (3.50.4 vs 3.49.2). |
+It started as two backends behind one interface, which is how `better-sqlite3`
+was removed with confidence: the same suite ran green on both before anything was
+deleted. The adapter stays because it keeps the awkward parts in one file —
+`node:sqlite` has no `pragma()` helper and returns null-prototype rows — and
+because `node:sqlite` is still flagged experimental, so those are exactly the
+places a Node upgrade would break. `sqlite.test.ts` pins them.
 
-The adapter exists because the right answer depends on a decision not yet made.
-Building for three platforms argues for `node:sqlite`; wanting `sqlite-vec` or
-Bun argues for keeping the native addon — loading any SQLite extension puts the
-per-platform binary problem straight back, so `node:sqlite` only buys portability
-while you stay on stock SQLite.
-
-Both are exercised by the same tests, including FTS5, BLOB round-trips, foreign
-key cascades and `lastInsertRowid` typing, which is where the two actually differ.
+One thing this does not solve: loading any SQLite extension (`sqlite-vec`, say)
+brings per-platform binaries straight back. Semantic search currently does a
+linear cosine scan in JavaScript, which is fine at notebook scale.
 
 ## Calling it from something else
 
