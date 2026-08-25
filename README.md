@@ -81,7 +81,10 @@ npm run app:build
 ```
 
 Produces an unsigned `Roundstorm.app` (~21 MB) that bundles the daemon and starts
-it on launch.
+it on launch. `npm run check:arch` runs after the build and fails if the bundle
+is not arm64-only with a minimum macOS of 11.0 — declaring 10.15 while shipping
+arm64-only code makes macOS report the app as having a non-Apple-Silicon
+component, because Catalina predates Apple Silicon entirely.
 
 **Everything is resolved by absolute path, never through `PATH`.** A GUI app
 launched from Finder or the Dock inherits `/usr/bin:/bin:/usr/sbin:/sbin` and

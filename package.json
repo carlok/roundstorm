@@ -21,8 +21,9 @@
     "build": "npm run build:web && npm run build:server",
     "tauri": "tauri",
     "app:dev": "tauri dev",
-    "app:build": "npm run build && tauri build",
-    "coverage": "tsx --test --experimental-test-coverage server/src/deliberation/*.test.ts server/src/adapters/*.test.ts web/src/lib/*.test.ts"
+    "app:build": "npm run build && tauri build && npm run check:arch",
+    "coverage": "tsx --test --experimental-test-coverage server/src/deliberation/*.test.ts server/src/adapters/*.test.ts web/src/lib/*.test.ts",
+    "check:arch": "node scripts/check-arch.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^11.7.0",
