@@ -107,3 +107,43 @@ for (const [name, open] of backends) {
     db.close()
   })
 }
+
+test('backup captures data still sitting in the WAL', async () => {
+  // The failure this prevents: copying only the .db file yields a snapshot that
+  // opens cleanly and is quietly missing recent work, because in WAL mode the
+  // newest writes live in the -wal — which is routinely larger than the .db.
+  const { copyFileSync } = await import('node:fs')
+  const dir = mkdtempSync(join(tmpdir(), 'rs-bk-'))
+  const src = join(dir, 'src.db')
+
+  const db = openNodeSqlite(src)
+  db.pragma('journal_mode = WAL')
+  db.exec('CREATE TABLE t (id INTEGER PRIMARY KEY AUTOINCREMENT, v TEXT)')
+  const insert = db.prepare('INSERT INTO t (v) VALUES (?)')
+  for (let i = 0; i < 200; i++) insert.run(`row ${i}`)
+
+  // The naive approach, for contrast.
+  const naive = join(dir, 'naive.db')
+  copyFileSync(src, naive)
+
+  const proper = join(dir, 'proper.db')
+  await db.backup(proper)
+  db.close()
+
+  // A copy can be missing the table entirely: in WAL mode even the schema may
+  // not have reached the .db yet.
+  const count = (p: string) => {
+    const h = openNodeSqlite(p)
+    try {
+      return (h.prepare('SELECT COUNT(*) AS c FROM t').get() as any).c as number
+    } catch {
+      return -1
+    } finally {
+      h.close()
+    }
+  }
+
+  assert.equal(count(proper), 200, 'backup() lost rows held in the WAL')
+  assert.ok(count(naive) < 200,
+    'expected the plain file copy to be incomplete; if it is not, this test no longer proves anything')
+})

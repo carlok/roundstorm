@@ -174,6 +174,22 @@ the next one.
 
 Neither is undoable, and both refuse while a deliberation is running.
 
+## Backing up
+
+**Inspector → Activity → Back up everything** downloads a single SQLite file
+containing every room, transcript, positions ledger, source, memory card and log
+entry. Also on `⌘K → Back up everything`.
+
+To restore, quit the app and put the file back as
+`~/Library/Application Support/Roundstorm/roundstorm.db`.
+
+It is a real snapshot, not a file copy. Roundstorm runs SQLite in WAL mode, where
+recent writes live in a separate `-wal` file that is routinely *larger* than the
+database — so copying just the `.db` gives you something that opens cleanly and
+is silently missing your recent work. Tested here: three messages written, then
+the snapshot had all three while a plain copy of the same database had no tables
+at all.
+
 ## Shortcuts
 
 | | |

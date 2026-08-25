@@ -24,6 +24,14 @@ export interface SqliteDatabase {
   /** `journal_mode = WAL`, not the full `PRAGMA …` statement. */
   pragma(statement: string): void
   close(): void
+  /**
+   * Write a consistent snapshot to `destPath`.
+   *
+   * Not a file copy: in WAL mode the newest data lives in the -wal file, which
+   * can be larger than the database itself, so copying only the .db yields a
+   * stale snapshot that looks plausible. Learned the hard way.
+   */
+  backup(destPath: string): Promise<void>
   /** For diagnostics: which implementation is behind this handle. */
   readonly backend: 'better-sqlite3' | 'node:sqlite'
   readonly sqliteVersion: string

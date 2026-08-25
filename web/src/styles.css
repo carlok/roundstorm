@@ -733,3 +733,11 @@ button.primary.danger-btn { background: var(--danger); }
 }
 .manual-note.warn { border-left-color: #d68c3f; }
 .field-aside { color: var(--fg-faint) !important; font-style: italic; }
+.backup-link {
+  display: inline-block; border: 1px solid var(--line); background: var(--bg);
+  border-radius: 7px; padding: 5px 12px; color: var(--fg) !important;
+  font-size: 12px; text-decoration: none;
+}
+.backup-link:hover { background: var(--bg-sunken); }
+.backup-note { margin: 8px 0 14px; font-size: 11.5px; line-height: 1.5; }
+.backup-note code { display: block; margin-top: 3px; word-break: break-all; }

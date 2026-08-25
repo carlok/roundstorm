@@ -220,6 +220,8 @@ export function App() {
       { id: 'search', label: 'Search this room', hint: '⌘F', run: () => setSearch(true) },
       { id: 'gsearch', label: 'Search every room', hint: '⇧⌘F', run: () => setGlobalSearch(true) },
       { id: 'manual', label: 'How Roundstorm works — the manual', hint: '?', run: () => setManual(true) },
+      { id: 'backup', label: 'Back up everything…', hint: 'action',
+        run: () => { window.location.href = apiUrl('/api/backup') } },
       { id: 'lab', label: 'Persona lab — compare brains', hint: 'experiment', run: () => setLab(true) },
       { id: 'new-room', label: 'New room…', hint: 'action', run: () => setRoomSheet({ room: null }) },
       { id: 'new-agent', label: 'New researcher…', hint: 'action', run: () => setAgentSheet({ agent: null }) },

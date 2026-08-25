@@ -1,4 +1,8 @@
 import express from 'express'
+import { createReadStream, rmSync, statSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import * as db from './db.ts'
 import { bus } from './bus.ts'
 import { ALL_PERSONAS } from './deliberation/personas.ts'
@@ -148,6 +152,32 @@ export function makeApi() {
     }
     res.setHeader('content-type', 'text/markdown; charset=utf-8')
     res.send(renderResultMarkdown(payload as any))
+  })
+
+  /**
+   * A consistent snapshot of the whole store: every room, transcript, position,
+   * source, memory card and log entry, in one SQLite file.
+   *
+   * Uses SQLite's backup API rather than copying the file. In WAL mode the newest
+   * writes live in the -wal, which is routinely larger than the .db, so a plain
+   * copy produces a stale snapshot that opens fine and quietly lacks recent work.
+   */
+  api.get('/backup', async (_req, res) => {
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
+    const name = `roundstorm-${stamp}.db`
+    const tmp = join(tmpdir(), `${randomUUID()}.db`)
+    try {
+      await db.db.backup(tmp)
+      const bytes = statSync(tmp).size
+      db.logEvent('backup.created', { payload: { bytes } })
+      res.setHeader('content-type', 'application/vnd.sqlite3')
+      res.setHeader('content-disposition', `attachment; filename="${name}"`)
+      res.setHeader('content-length', String(bytes))
+      createReadStream(tmp).pipe(res).on('close', () => rmSync(tmp, { force: true }))
+    } catch (err) {
+      rmSync(tmp, { force: true })
+      res.status(500).json({ error: `backup failed: ${String(err)}` })
+    }
   })
 
   // Activity log as JSONL — the auditable stream, separate from the transcript.

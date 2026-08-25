@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-type Section = 'start' | 'modes' | 'rounds' | 'reading' | 'access' | 'clearing' | 'keys'
+type Section = 'start' | 'modes' | 'rounds' | 'reading' | 'access' | 'clearing' | 'backup' | 'keys'
 
 /**
  * The in-app manual.
@@ -30,6 +30,7 @@ export function Manual({ onClose }: { onClose: () => void }) {
               ['reading', 'Reading a discussion'],
               ['access', 'What agents may do'],
               ['clearing', 'Clearing a room'],
+              ['backup', 'Backing up'],
               ['keys', 'Shortcuts'],
             ] as [Section, string][]).map(([k, label]) => (
               <button key={k} className={tab === k ? 'sel' : ''} onClick={() => setTab(k)}>
@@ -45,6 +46,7 @@ export function Manual({ onClose }: { onClose: () => void }) {
             {tab === 'reading' && <Reading />}
             {tab === 'access' && <Access />}
             {tab === 'clearing' && <Clearing />}
+            {tab === 'backup' && <Backup />}
             {tab === 'keys' && <Keys />}
           </div>
         </div>
@@ -277,6 +279,32 @@ const Clearing = () => (
     <h3>Delete room</h3>
     <p>The same, and the room goes too.</p>
     <p>Neither is undoable, and both refuse while a deliberation is running.</p>
+  </>
+)
+
+const Backup = () => (
+  <>
+    <h3>Back up everything</h3>
+    <p>
+      In <b>Inspector → Activity</b>, or <code>⌘K → Back up everything</code>. You get one
+      SQLite file with every room, transcript, positions ledger, source, memory card
+      and log entry.
+    </p>
+    <p>
+      To restore, quit the app and put the file back as
+      <code>~/Library/Application Support/Roundstorm/roundstorm.db</code>.
+    </p>
+    <h3>Why not just copy the file?</h3>
+    <p>
+      Because it does not work. SQLite runs in WAL mode here, so recent writes live
+      in a separate <code>-wal</code> file that is routinely larger than the database
+      itself. Copying only the <code>.db</code> gives you something that opens cleanly
+      and is quietly missing your recent work.
+    </p>
+    <p className="manual-aside">
+      Measured: three messages written, then the proper snapshot had all three while
+      a plain copy of the same live database had no tables at all.
+    </p>
   </>
 )
 

@@ -1,4 +1,4 @@
-import { DatabaseSync } from 'node:sqlite'
+import { DatabaseSync, backup } from 'node:sqlite'
 import type { RunResult, SqliteDatabase, Statement } from './types.ts'
 
 /**
@@ -37,5 +37,6 @@ export function openNodeSqlite(path: string): SqliteDatabase {
     exec: sql => { db.exec(sql) },
     pragma: statement => { db.exec(`PRAGMA ${statement}`) },
     close: () => db.close(),
+    backup: async destPath => { await backup(db, destPath) },
   }
 }

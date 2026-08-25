@@ -129,13 +129,25 @@ export function Inspector({ positions, sources, roster, roomId, agentById, onCit
         {tab === 'activity' && (
           <>
             <div className="log-actions">
-              <a href={apiUrl(`/api/events/export?roomId=${roomId}`)} download="roundstorm-log.jsonl">
-                Export JSONL
-              </a>
               <a href={apiUrl(`/api/rooms/${roomId}/export?format=markdown`)} download="roundstorm.md">
-                Export Markdown
+                This room as Markdown
+              </a>
+              <a href={apiUrl(`/api/events/export?roomId=${roomId}`)} download="roundstorm-log.jsonl">
+                This room's log
               </a>
             </div>
+            <div className="log-actions">
+              {/* Everything, as one openable SQLite file — the thing to keep if
+                  you keep only one. */}
+              <a className="backup-link" href={apiUrl('/api/backup')}>
+                ⬇ Back up everything
+              </a>
+            </div>
+            <p className="muted backup-note">
+              A consistent snapshot of every room, transcript, position, source and
+              memory card. Restore by putting it back as
+              <code>~/Library/Application Support/Roundstorm/roundstorm.db</code>.
+            </p>
             {events.map(e => (
               <div key={e.id} className="logline">
                 <span className="log-time">
