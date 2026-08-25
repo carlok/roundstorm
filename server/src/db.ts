@@ -1,4 +1,3 @@
-import Database from 'better-sqlite3'
 import { randomUUID } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -14,7 +13,9 @@ const DATA_DIR = resolve(process.env.ROUNDSTORM_DATA
   ?? join(homedir(), 'Library', 'Application Support', 'Roundstorm'))
 mkdirSync(DATA_DIR, { recursive: true })
 
-export const db = new Database(join(DATA_DIR, 'roundstorm.db'))
+import { openDatabase } from './sqlite/index.ts'
+
+export const db = openDatabase(join(DATA_DIR, 'roundstorm.db'))
 db.pragma('journal_mode = WAL')
 db.pragma('foreign_keys = ON')
 

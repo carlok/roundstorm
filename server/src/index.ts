@@ -5,7 +5,7 @@ import { makeApi } from './api.ts'
 import { bus } from './bus.ts'
 import { seedIfEmpty } from './seed.ts'
 import { probeBrains } from './adapters/registry.ts'
-import { DATA_PATH, logEvent } from './db.ts'
+import { DATA_PATH, db, logEvent } from './db.ts'
 
 const PORT = Number(process.env.PORT ?? 8787)
 
@@ -57,6 +57,7 @@ server.listen(PORT, '127.0.0.1', async () => {
   // indistinguishable from a daemon that never came up.
   console.log(`roundstorm daemon  http://127.0.0.1:${PORT}`)
   console.log(`data               ${DATA_PATH}`)
+  console.log(`storage            ${db.backend} (SQLite ${db.sqliteVersion})`)
   console.log(`brains             probing…`)
 
   const brains = await probeBrains()
