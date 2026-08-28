@@ -1,6 +1,7 @@
 import express from 'express'
 import { existsSync } from 'node:fs'
 import { createServer } from 'node:http'
+import { networkInterfaces } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { WebSocketServer } from 'ws'
@@ -11,6 +12,29 @@ import { probeBrains } from './adapters/registry.ts'
 import { DATA_PATH, db, logEvent } from './db.ts'
 
 const PORT = Number(process.env.PORT ?? 8787)
+
+/**
+ * Where to listen. Loopback unless explicitly told otherwise.
+ *
+ * Binding beyond loopback exposes an unauthenticated API that can start
+ * processes on this machine — at the workstation and full-local tiers that means
+ * reading and writing files and running commands. It is genuinely useful for
+ * driving the interface from another machine on a trusted network, and it is not
+ * something to leave on.
+ */
+const HOST = process.env.ROUNDSTORM_HOST ?? '127.0.0.1'
+const isLoopback = HOST === '127.0.0.1' || HOST === 'localhost' || HOST === '::1'
+
+/** Addresses this machine can be reached on, for the startup banner. */
+function lanUrls(): string[] {
+  const out: string[] = []
+  for (const ifaces of Object.values(networkInterfaces())) {
+    for (const i of ifaces ?? []) {
+      if (i.family === 'IPv4' && !i.internal) out.push(`http://${i.address}:${PORT}`)
+    }
+  }
+  return out
+}
 
 seedIfEmpty()
 
@@ -92,7 +116,7 @@ function watchParent() {
   }, 3000).unref()
 }
 
-server.listen(PORT, '127.0.0.1', async () => {
+server.listen(PORT, HOST, async () => {
   watchParent()
   // Print before probing. Brain discovery shells out to every CLI and
   // `cursor-agent --list-models` alone takes ~30s, so logging only afterwards
@@ -106,6 +130,19 @@ server.listen(PORT, '127.0.0.1', async () => {
   console.log(webRoot
     ? `interface          http://127.0.0.1:${PORT}`
     : `interface          API only (the shell or the dev server is serving the UI)`)
+
+  if (!isLoopback) {
+    // Deliberately noisy. Someone who set this on purpose loses nothing by
+    // reading four lines; someone who set it by accident needs to.
+    console.log('')
+    console.log(`!! listening on ${HOST}, not just this machine`)
+    console.log('!! the API is unauthenticated and can start processes here.')
+    console.log('!! rooms above the research tier can read files and run commands.')
+    console.log('!! use this only on a network you trust, and only while you need it.')
+    for (const url of lanUrls()) console.log(`   reachable at ${url}`)
+    console.log('')
+    logEvent('daemon.exposed', { payload: { host: HOST, urls: lanUrls() } })
+  }
   console.log(`brains             probing…`)
 
   const brains = await probeBrains()

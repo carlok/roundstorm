@@ -82,7 +82,13 @@ in a per-platform data directory, overridable with `ROUNDSTORM_DATA`:
 
 Run the daemon and use a browser — the command at the top of this section. The
 desktop shell is macOS-only for now, and it is only a window around the same
-server.
+server. [`docs/other-platforms.md`](docs/other-platforms.md) has the clone-and-run
+steps and a checklist of what to verify.
+
+To drive the interface from another machine without installing anything there,
+`ROUNDSTORM_HOST=0.0.0.0` binds beyond loopback — **which exposes an
+unauthenticated API that can start processes on this machine.** Trusted networks
+only, and only while you need it. The default is loopback.
 
 The daemon itself is platform-aware: binaries are resolved through `PATHEXT` so
 `claude.cmd` and `codex.exe` are both found, npm shims are launched through a
