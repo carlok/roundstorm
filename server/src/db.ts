@@ -7,10 +7,31 @@ import type {
   PositionStanceRow, Project, ResultCard, Room, Source, Stance, Tier,
 } from './types.ts'
 
-// Always absolute: child CLIs resolve paths we hand them against their own cwd,
-// so a relative data dir silently becomes a different (missing) directory.
-const DATA_DIR = resolve(process.env.ROUNDSTORM_DATA
-  ?? join(homedir(), 'Library', 'Application Support', 'Roundstorm'))
+/**
+ * Where the research lives.
+ *
+ * Always absolute: child CLIs resolve paths we hand them against their own cwd,
+ * so a relative data dir silently becomes a different (missing) directory.
+ *
+ * Per-platform, because `~/Library/Application Support` is a macOS convention and
+ * creating that literal path on Linux or Windows is just wrong — it works, which
+ * is worse, because the data ends up somewhere no backup tool or user expects.
+ */
+export function defaultDataDirFor(platform: NodeJS.Platform, home: string, env: NodeJS.ProcessEnv = {}): string {
+  switch (platform) {
+    case 'darwin':
+      return join(home, 'Library', 'Application Support', 'Roundstorm')
+    case 'win32':
+      return join(env.APPDATA ?? join(home, 'AppData', 'Roaming'), 'Roundstorm')
+    default:
+      // XDG Base Directory, which is what Linux desktops and backup tools expect.
+      return join(env.XDG_DATA_HOME ?? join(home, '.local', 'share'), 'roundstorm')
+  }
+}
+
+const defaultDataDir = () => defaultDataDirFor(process.platform, homedir(), process.env)
+
+const DATA_DIR = resolve(process.env.ROUNDSTORM_DATA ?? defaultDataDir())
 mkdirSync(DATA_DIR, { recursive: true })
 
 import { openDatabase } from './sqlite/index.ts'

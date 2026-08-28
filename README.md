@@ -1,8 +1,8 @@
 # Roundstorm
 
-A local-first macOS app where persistent, heterogeneous AI researchers deliberate
-for N rounds on a hard question — with as little orchestration effort from you as
-an ordinary group chat.
+A local-first app where persistent, heterogeneous AI researchers deliberate for N
+rounds on a hard question — with as little orchestration effort from you as an
+ordinary group chat.
 
 You write the question once. They do the arguing.
 
@@ -55,11 +55,28 @@ reach consensus" are reported honestly rather than smoothed into agreement.
 
 ```bash
 npm install
+npm run build
+node dist-server/index.mjs      # then open http://127.0.0.1:8787
+```
+
+The daemon serves the interface itself, so that one command is the whole product
+— on macOS, Linux or Windows, with nothing but Node 22.5+. No Rust toolchain, no
+WebKitGTK, no WebView2, nothing to sign.
+
+For development with hot reload:
+
+```bash
 npm run dev
 ```
 
 Then open http://localhost:5273. The daemon listens on 8787 and stores everything
-in `~/Library/Application Support/Roundstorm` (override with `ROUNDSTORM_DATA`).
+in a per-platform data directory, overridable with `ROUNDSTORM_DATA`:
+
+| | |
+|---|---|
+| macOS | `~/Library/Application Support/Roundstorm` |
+| Linux | `$XDG_DATA_HOME/roundstorm`, else `~/.local/share/roundstorm` |
+| Windows | `%APPDATA%\Roundstorm` |
 
 ### Both at once
 
@@ -75,6 +92,10 @@ Running the full `npm run dev` while the app is open just fails on
 `EADDRINUSE` for the second daemon.
 
 ### As a macOS app
+
+The desktop shell is a convenience, not the product — it draws a window around the
+same daemon. It is macOS-only today; on Linux and Windows run the daemon and use a
+browser, which is the command above.
 
 ```bash
 npm run app:build

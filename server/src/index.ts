@@ -1,5 +1,8 @@
 import express from 'express'
+import { existsSync } from 'node:fs'
 import { createServer } from 'node:http'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { WebSocketServer } from 'ws'
 import { makeApi } from './api.ts'
 import { bus } from './bus.ts'
@@ -14,6 +17,42 @@ seedIfEmpty()
 const app = express()
 app.use('/api', makeApi())
 app.get('/health', (_req, res) => res.json({ ok: true, data: DATA_PATH }))
+
+/**
+ * Serve the built UI, so the daemon alone is the whole product.
+ *
+ * This is what makes Roundstorm runnable on Linux and Windows: the desktop shell
+ * is the only platform-specific part, and it exists to draw a window around this
+ * server. Without it you get the same app in a browser tab, on any machine with
+ * Node — no Rust toolchain, no WebKitGTK, no WebView2, nothing to sign.
+ *
+ * Skipped when the bundle is absent (`npm run dev`, where Vite serves the UI and
+ * proxies here, and the packaged app, which serves the UI itself).
+ */
+const webRoot = findWebRoot()
+if (webRoot) {
+  app.use(express.static(webRoot, { index: 'index.html' }))
+  // SPA fallback, but never for /api or /ws — a mistyped endpoint should 404 as
+  // an endpoint, not silently return the app shell with a 200.
+  app.get(/^(?!\/(api|ws|health)\b).*/, (_req, res) => {
+    res.sendFile(join(webRoot, 'index.html'))
+  })
+}
+
+function findWebRoot(): string | null {
+  const here = dirname(fileURLToPath(import.meta.url))
+  const candidates = [
+    process.env.ROUNDSTORM_WEB_ROOT,
+    // Bundled: dist-server/index.mjs sits beside dist-web/.
+    join(here, '..', 'dist-web'),
+    // Running from source via tsx: server/src/ -> repo root.
+    join(here, '..', '..', 'dist-web'),
+  ].filter((p): p is string => !!p)
+  for (const c of candidates) {
+    if (existsSync(join(c, 'index.html'))) return resolve(c)
+  }
+  return null
+}
 
 const server = createServer(app)
 const wss = new WebSocketServer({ server, path: '/ws' })
@@ -58,6 +97,9 @@ server.listen(PORT, '127.0.0.1', async () => {
   console.log(`roundstorm daemon  http://127.0.0.1:${PORT}`)
   console.log(`data               ${DATA_PATH}`)
   console.log(`storage            ${db.backend} (SQLite ${db.sqliteVersion})`)
+  console.log(webRoot
+    ? `interface          http://127.0.0.1:${PORT}`
+    : `interface          not bundled — run \`npm run build\`, or use the dev server`)
   console.log(`brains             probing…`)
 
   const brains = await probeBrains()

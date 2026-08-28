@@ -105,9 +105,13 @@ fn spawn_daemon(entry: &std::path::Path, log_path: &std::path::Path) -> std::io:
         .spawn()
 }
 
-/// Minimum Node that can run the daemon. The bundle is ESM, and anything older
-/// than this dies with "SyntaxError: Unexpected token import".
-const MIN_NODE_MAJOR: u32 = 20;
+/// Minimum Node that can run the daemon.
+///
+/// 22 because storage is `node:sqlite`, which landed in 22.5 — an older Node
+/// parses the bundle fine and then dies on the import, which is a much more
+/// confusing failure than "no suitable Node found". This has to stay in step with
+/// the `engines` field in package.json.
+const MIN_NODE_MAJOR: u32 = 22;
 
 /// Find a Node that can actually run the daemon.
 ///
