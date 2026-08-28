@@ -19,6 +19,8 @@ import { spawn } from 'node:child_process'
 import type { AdapterEvent, BrainAdapter, TurnRequest } from './types.ts'
 import type { Tier } from '../types.ts'
 import { resolveBin, spawnEnv } from './resolve.ts'
+import { checkCommandLine, needsShell } from './platform.ts'
+import { terminate } from './spawn.ts'
 
 const ALL_TOOLS = [
   'Task', 'Artifact', 'Bash', 'CronCreate', 'CronDelete', 'CronList', 'DesignSync',
@@ -100,13 +102,25 @@ async function* runClaude(req: TurnRequest, signal: AbortSignal): AsyncIterable<
     return
   }
 
+  // claude is an npm package, so on Windows it resolves to claude.cmd and can
+  // only be launched through a shell — which also lowers the command-line
+  // ceiling to 8 KB, and the prompt is passed as an argument.
+  const viaShell = needsShell(bin, process.platform)
+  const length = checkCommandLine(bin, args, process.platform, viaShell)
+  if (!length.ok) {
+    yield { type: 'error', message: length.message! }
+    return
+  }
+
   const child = spawn(bin, args, {
     cwd: req.workingDir ?? undefined,
     stdio: ['ignore', 'pipe', 'pipe'],
     env: spawnEnv({ CLAUDE_CODE_ENTRYPOINT: 'roundstorm' }),
+    shell: viaShell,
+    windowsHide: true,
   })
 
-  const onAbort = () => child.kill('SIGTERM')
+  const onAbort = () => terminate(child)
   signal.addEventListener('abort', onAbort, { once: true })
 
   const queue: AdapterEvent[] = []
@@ -190,7 +204,7 @@ async function* runClaude(req: TurnRequest, signal: AbortSignal): AsyncIterable<
     }
   } finally {
     signal.removeEventListener('abort', onAbort)
-    if (!child.killed) child.kill('SIGTERM')
+    terminate(child)
   }
 }
 

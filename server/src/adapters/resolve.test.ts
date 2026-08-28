@@ -5,7 +5,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { delimiter } from 'node:path'
+import { delimiter, sep } from 'node:path'
 import { enrichedPath, resolveBin } from './resolve.ts'
 
 test('a CLI is found even with a Finder-style stub PATH', () => {
@@ -30,10 +30,13 @@ test('something genuinely absent resolves to null rather than a guess', () => {
 
 test('the enriched PATH covers the locations these tools actually install to', () => {
   const dirs = enrichedPath().split(delimiter)
-  // ~/.local/bin holds agy, codex and cursor-agent on this machine; nvm holds claude.
-  assert.ok(dirs.some(d => d.endsWith('/.local/bin')), 'missing ~/.local/bin')
-  assert.ok(dirs.some(d => d.includes('/.nvm/versions/node/')), 'missing nvm bins')
-  assert.ok(dirs.includes('/opt/homebrew/bin'))
+  // agy, codex and cursor-agent install to ~/.local/bin on Unix; claude comes
+  // from a node version manager. Asserted without pinning macOS-only paths, so
+  // this keeps meaning something on Linux.
+  assert.ok(dirs.some(d => d.endsWith(`${sep}.local${sep}bin`)), 'missing ~/.local/bin')
+  if (process.platform === 'darwin') {
+    assert.ok(dirs.includes('/opt/homebrew/bin'), 'Homebrew missing on macOS')
+  }
 })
 
 test('the enriched PATH has no duplicates', () => {

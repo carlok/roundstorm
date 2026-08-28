@@ -78,6 +78,19 @@ in a per-platform data directory, overridable with `ROUNDSTORM_DATA`:
 | Linux | `$XDG_DATA_HOME/roundstorm`, else `~/.local/share/roundstorm` |
 | Windows | `%APPDATA%\Roundstorm` |
 
+### On Linux and Windows
+
+Run the daemon and use a browser — the command at the top of this section. The
+desktop shell is macOS-only for now, and it is only a window around the same
+server.
+
+The daemon itself is platform-aware: binaries are resolved through `PATHEXT` so
+`claude.cmd` and `codex.exe` are both found, npm shims are launched through a
+shell while native executables are not, and an over-long prompt is refused with an
+explanation rather than Windows' own error. Those paths are covered by tests that
+pass the platform in, so they are asserted rather than assumed — but nobody has
+run this on Windows yet, and the first real attempt will find something.
+
 ### Both at once
 
 The daemon owns port 8787 and the app starts its own. To use the browser
@@ -121,12 +134,12 @@ removing the one native dependency (`better-sqlite3`); Node's built-in
 `node:sqlite` would do it, but it is still flagged experimental.
 
 ```bash
-npm test          # 71 tests
+npm test          # 103 tests
 npm run coverage  # the same, with a coverage report
 npm run typecheck
 ```
 
-Coverage sits around **65% of lines, 83% of branches** overall, and that average
+Coverage sits around **69% of lines, 83% of branches** overall, and that average
 is not the interesting number. The split is deliberate:
 
 | Area | Lines | Why |
@@ -136,7 +149,9 @@ is not the interesting number. The split is deliberate:
 | `deliberation/conclave.ts` | 89% | Unanimity, endorsement expiry, the cap. |
 | `deliberation/context.ts` | 93% | Round isolation is asserted against the composed prompt. |
 | `db.ts` | 88% | |
-| `adapters/*.ts` | 20–35% | Each one is a subprocess and a JSON translation. Their real failures — a stub PATH, a rejected flag, a schema dialect — are found by running the CLI, not by mocking it. |
+| `adapters/platform.ts` | 94% | Every Windows rule lives here — PATHEXT, `.cmd` shims, the command-line ceiling — and none of it can be exercised on macOS except by test. |
+| `adapters/resolve.ts`, `spawn.ts` | 75–87% | Binary resolution and process launch. Twice now a silent regression here removed an agent from a room without saying so. |
+| the CLI adapters | 20–35% | Each is a subprocess and a JSON translation. Their real failures — a stub PATH, a rejected flag, a schema dialect — are found by running the CLI, not by mocking it. |
 | `scheduler.ts`, `synthesis.ts` | 17–22% | Orchestration over live model calls. The parts worth asserting (workspace scoping, round isolation) are extracted and tested; the loops around them were verified by running them. |
 
 The rule applied throughout: **test the things that fail silently.** A wrong

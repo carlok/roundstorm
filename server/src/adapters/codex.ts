@@ -11,12 +11,12 @@
  *    auth.json back to the real one; a token refresh then propagates instead of
  *    going stale the way a copy would.
  */
-import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { AdapterEvent, BrainAdapter, TurnRequest } from './types.ts'
 import { streamProcess, which } from './spawn.ts'
-import { DATA_PATH } from '../db.ts'
+import { DATA_PATH, logEvent } from '../db.ts'
 import type { Tier } from '../types.ts'
 
 const SANDBOX: Record<Tier, string> = {
@@ -32,10 +32,24 @@ function isolatedHome(): string {
   mkdirSync(home, { recursive: true })
   const link = join(home, 'auth.json')
   const real = join(homedir(), '.codex', 'auth.json')
+  if (!existsSync(real)) return home
+
   try {
     if (existsSync(link)) rmSync(link)
-    if (existsSync(real)) symlinkSync(real, link)
-  } catch { /* fall back to whatever is already there */ }
+    symlinkSync(real, link)
+    return home
+  } catch {
+    // Windows refuses file symlinks without Developer Mode or elevation. Falling
+    // through silently would leave codex running unauthenticated with no
+    // explanation — the same shape as the conclave that reported a holdout for an
+    // agent that never started. Copy instead, and re-copy each turn so a token
+    // refresh is picked up rather than going stale.
+    try {
+      copyFileSync(real, link)
+    } catch (err) {
+      logEvent('codex.auth.unavailable', { payload: { error: String(err) } })
+    }
+  }
   return home
 }
 

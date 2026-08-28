@@ -181,8 +181,13 @@ Downloads folder containing every room, transcript, positions ledger, source,
 memory card and log entry, and tells you the path. Also on
 `⌘K → Back up everything`.
 
-To restore, quit the app and put the file back as
-`~/Library/Application Support/Roundstorm/roundstorm.db`.
+To restore, quit the app and put the file back over the existing database:
+
+| | |
+|---|---|
+| macOS | `~/Library/Application Support/Roundstorm/roundstorm.db` |
+| Linux | `~/.local/share/roundstorm/roundstorm.db` |
+| Windows | `%APPDATA%\Roundstorm\roundstorm.db` |
 
 It saves the file directly rather than serving it as a browser download. A
 WKWebView does not handle `content-disposition` the way a browser does, and

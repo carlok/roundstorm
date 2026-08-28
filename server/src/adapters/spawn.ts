@@ -1,6 +1,27 @@
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import type { AdapterEvent } from './types.ts'
 import { resolveBin, spawnEnv } from './resolve.ts'
+import { checkCommandLine, needsShell } from './platform.ts'
+
+/**
+ * End a child and everything it started.
+ *
+ * The brains spawn their own processes — `claude` runs node, `codex` runs git.
+ * On Unix a SIGTERM to the child is enough in practice. Windows has no SIGTERM
+ * at all (Node emulates it as an immediate TerminateProcess) and killing a
+ * parent there leaves its children running, so the tree has to be taken down
+ * explicitly or a cancelled turn keeps burning tokens invisibly.
+ */
+export function terminate(child: { pid?: number; killed: boolean; kill: (s?: NodeJS.Signals) => boolean }): void {
+  if (child.killed || !child.pid) return
+  if (process.platform === 'win32') {
+    try {
+      spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' })
+      return
+    } catch { /* fall through to the best Node can do */ }
+  }
+  try { child.kill('SIGTERM') } catch { /* already gone */ }
+}
 
 export interface StreamOpts {
   cwd?: string
@@ -30,6 +51,18 @@ export async function* streamProcess(
     return
   }
 
+  // npm installs its CLIs as .cmd shims, which Node has refused to spawn
+  // directly since the fix for CVE-2024-27980.
+  const viaShell = needsShell(bin, process.platform)
+
+  // Check before spawning: over the ceiling, Windows fails with an error that
+  // names neither the cause nor which agent produced the oversized prompt.
+  const length = checkCommandLine(bin, args, process.platform, viaShell)
+  if (!length.ok) {
+    yield { type: 'error', message: length.message! }
+    return
+  }
+
   const child = spawn(bin, args, {
     cwd: opts.cwd,
     // stdin must be closed: codex otherwise blocks on "Reading additional input from stdin".
@@ -38,9 +71,11 @@ export async function* streamProcess(
     // CODEX_HOME — would otherwise hand the child an environment with no PATH,
     // and these CLIs shell out to node and git themselves.
     env: { ...spawnEnv(), ...(opts.env ?? {}) },
+    shell: viaShell,
+    windowsHide: true,
   })
 
-  const onAbort = () => child.kill('SIGTERM')
+  const onAbort = () => terminate(child)
   signal.addEventListener('abort', onAbort, { once: true })
 
   const queue: AdapterEvent[] = []
@@ -94,7 +129,7 @@ export async function* streamProcess(
     }
   } finally {
     signal.removeEventListener('abort', onAbort)
-    if (!child.killed) child.kill('SIGTERM')
+    terminate(child)
   }
 }
 
@@ -111,9 +146,14 @@ export function capture(cmd: string, args: string[], timeoutMs = 25_000): Promis
   return new Promise(resolve => {
     const bin = resolveBin(cmd)
     if (!bin) return resolve('')
-    const p = spawn(bin, args, { stdio: ['ignore', 'pipe', 'ignore'], env: spawnEnv() })
+    const p = spawn(bin, args, {
+      stdio: ['ignore', 'pipe', 'ignore'],
+      env: spawnEnv(),
+      shell: needsShell(bin, process.platform),
+      windowsHide: true,
+    })
     let out = ''
-    const timer = setTimeout(() => { p.kill('SIGKILL'); resolve(out) }, timeoutMs)
+    const timer = setTimeout(() => { terminate(p); resolve(out) }, timeoutMs)
     p.stdout.setEncoding('utf8')
     p.stdout.on('data', d => { out += d })
     p.on('close', () => { clearTimeout(timer); resolve(out) })

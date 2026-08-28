@@ -81,7 +81,11 @@ function watchParent() {
       process.kill(parent, 0)
       alive = true
     } catch { /* gone */ }
-    if (!alive || process.ppid === 1) {
+    // `ppid === 1` is the Unix orphan signal. Windows does not reparent, and a
+    // systemd user session may reparent to a subreaper rather than pid 1, so the
+    // liveness probe above is the portable half and this is a Unix bonus.
+    const reparented = process.platform !== 'win32' && process.ppid === 1
+    if (!alive || reparented) {
       logEvent('daemon.orphaned', { payload: { parent } })
       process.exit(0)
     }
@@ -97,9 +101,11 @@ server.listen(PORT, '127.0.0.1', async () => {
   console.log(`roundstorm daemon  http://127.0.0.1:${PORT}`)
   console.log(`data               ${DATA_PATH}`)
   console.log(`storage            ${db.backend} (SQLite ${db.sqliteVersion})`)
+  // Absent is normal, not a fault: the desktop shell embeds the UI in its own
+  // binary, and `npm run dev` has Vite serve it.
   console.log(webRoot
     ? `interface          http://127.0.0.1:${PORT}`
-    : `interface          not bundled — run \`npm run build\`, or use the dev server`)
+    : `interface          API only (the shell or the dev server is serving the UI)`)
   console.log(`brains             probing…`)
 
   const brains = await probeBrains()
