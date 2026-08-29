@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-type Section = 'start' | 'modes' | 'rounds' | 'reading' | 'access' | 'clearing' | 'backup' | 'keys'
+type Section = 'start' | 'modes' | 'rounds' | 'reading' | 'access' | 'clearing' | 'backup' | 'experiments' | 'keys'
 
 /**
  * The in-app manual.
@@ -31,6 +31,7 @@ export function Manual({ onClose }: { onClose: () => void }) {
               ['access', 'What agents may do'],
               ['clearing', 'Clearing a room'],
               ['backup', 'Backing up'],
+              ['experiments', 'Experiment files'],
               ['keys', 'Shortcuts'],
             ] as [Section, string][]).map(([k, label]) => (
               <button key={k} className={tab === k ? 'sel' : ''} onClick={() => setTab(k)}>
@@ -47,6 +48,7 @@ export function Manual({ onClose }: { onClose: () => void }) {
             {tab === 'access' && <Access />}
             {tab === 'clearing' && <Clearing />}
             {tab === 'backup' && <Backup />}
+            {tab === 'experiments' && <Experiments />}
             {tab === 'keys' && <Keys />}
           </div>
         </div>
@@ -310,6 +312,32 @@ const Backup = () => (
     <p className="manual-aside">
       Measured: three messages written, then the proper snapshot had all three while
       a plain copy of the same live database had no tables at all.
+    </p>
+  </>
+)
+
+const Experiments = () => (
+  <>
+    <h3>One file, three places</h3>
+    <p>
+      A run can be written down: the cast, their personas and brains, the question,
+      the mode and the rounds, in one JSONC file. Comments are allowed.
+    </p>
+    <ul>
+      <li>Headless — <code>node dist-server/cli.mjs experiment.jsonc</code></li>
+      <li>Here — <code>⤓</code> next to <b>Rooms</b>, or <code>⌘K → Load an experiment file</code></li>
+      <li>Over HTTP — <code>POST /api/experiments</code></li>
+    </ul>
+    <h3>Loading one does not start it</h3>
+    <p>
+      It creates the cast and the room, prefills the question, and stops. A run
+      costs money, so pressing <b>Deliberate</b> stays yours. A file with a mistake is
+      refused with the field named — <code>agents[0].brain is required</code> — before
+      anything is created.
+    </p>
+    <p className="manual-aside">
+      A <code>.jsonl</code> file holds one experiment per line: the persona-lab
+      comparison, run without the interface.
     </p>
   </>
 )

@@ -47,12 +47,13 @@ function upsertAgent(spec: ExperimentConfig['agents'][number]): Agent {
     : db.createAgent(fields)
 }
 
-export async function runExperiment(
-  cfg: ExperimentConfig,
-  onProgress: (line: string) => void = () => {},
-): Promise<RunOutcome> {
-  const started = Date.now()
-
+/**
+ * Create the cast and the room described by a config, without running anything.
+ *
+ * Split out so the interface can import the same file the CLI runs: loading an
+ * experiment there should set the room up and hand it over, not start billing.
+ */
+export function setupExperiment(cfg: ExperimentConfig): { room: Room; agents: Agent[] } {
   const project = db.listProjects().find(p => p.name === (cfg.project ?? 'Research'))
     ?? db.createProject(cfg.project ?? 'Research', cfg.workingDir ?? null)
   if (cfg.workingDir && project.workingDir !== cfg.workingDir) {
@@ -60,7 +61,6 @@ export async function runExperiment(
   }
 
   const agents = cfg.agents.map(upsertAgent)
-  onProgress(`cast: ${agents.map(a => `${a.name}/${a.brain}`).join(', ')}`)
 
   const existingRoom = db.listRooms().find(r => r.name === cfg.room.name)
   const room = existingRoom ?? db.createRoom(
@@ -69,6 +69,17 @@ export async function runExperiment(
     db.setRoomMembers(room.id, agents.map(a => a.id))
     db.setRoomTier(room.id, cfg.room.tier ?? 'research')
   }
+  return { room: db.getRoom(room.id)!, agents }
+}
+
+export async function runExperiment(
+  cfg: ExperimentConfig,
+  onProgress: (line: string) => void = () => {},
+): Promise<RunOutcome> {
+  const started = Date.now()
+
+  const { room, agents } = setupExperiment(cfg)
+  onProgress(`cast: ${agents.map(a => `${a.name}/${a.brain}`).join(', ')}`)
 
   // The question belongs in the transcript, same as it would from the interface.
   db.insertMessage({ roomId: room.id, authorType: 'human', body: cfg.question })

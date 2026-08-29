@@ -201,6 +201,22 @@ is silently missing your recent work. Tested here: three messages written, then
 the snapshot had all three while a plain copy of the same database had no tables
 at all.
 
+## Experiment files
+
+A run can be described in one JSONC file — the cast, their personas and brains,
+the question, the mode and the rounds. The same file works in three places:
+
+- headless, `node dist-server/cli.mjs experiment.jsonc`
+- in the interface, `⤓` next to **Rooms** or `⌘K → Load an experiment file`
+- over HTTP, `POST /api/experiments`
+
+Loading one in the interface creates the cast and the room and stops there. It
+does not start a deliberation, because that costs money — the question is
+prefilled and pressing **Deliberate** is yours.
+
+A `.jsonl` file holds one experiment per line, which is the persona-lab
+comparison run without the interface.
+
 ## Shortcuts
 
 | | |

@@ -747,3 +747,20 @@ button.backup-link:disabled { opacity: .6; cursor: default; }
   margin: 8px 0 0; font-size: 11.5px; line-height: 1.5;
   color: #3fa87a; word-break: break-all;
 }
+
+/* ---------- experiment import ---------- */
+.pane-actions { display: flex; gap: 2px; }
+.dropzone {
+  border: 1px dashed var(--line); border-radius: 9px;
+  padding: 18px 12px; text-align: center; font-size: 12.5px;
+  color: var(--fg-faint); cursor: pointer; margin-bottom: 14px;
+}
+.dropzone:hover, .dropzone.over {
+  border-color: var(--accent); color: var(--fg); background: var(--bg-alt);
+}
+.sheet textarea[spellcheck="false"] { font-family: var(--mono); font-size: 12px; }
+.config-error {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  border-left: 3px solid var(--danger); border-radius: 0 8px 8px 0;
+  padding: 9px 12px; font-size: 12.5px; line-height: 1.5; margin: 0 0 14px;
+}

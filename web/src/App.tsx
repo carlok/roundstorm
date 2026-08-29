@@ -16,6 +16,7 @@ import { AgentEditor } from './components/AgentEditor.tsx'
 import { RoomEditor } from './components/RoomEditor.tsx'
 import { Ask, type AskSpec } from './components/Ask.tsx'
 import { Manual } from './components/Manual.tsx'
+import { LoadExperiment } from './components/LoadExperiment.tsx'
 import { copyText, messageToMarkdown, resultToMarkdown, transcriptToMarkdown } from './lib/clipboard.ts'
 import { apiUrl } from './lib/api.ts'
 import { installMathCopy } from './lib/mathcopy.ts'
@@ -47,6 +48,7 @@ export function App() {
   const [roomSheet, setRoomSheet] = useState<{ room: Room | null } | null>(null)
   const [ask, setAsk] = useState<AskSpec | null>(null)
   const [manual, setManual] = useState(false)
+  const [loadExp, setLoadExp] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
   const scroller = useRef<HTMLDivElement>(null)
   const pinned = useRef(true)
@@ -229,6 +231,7 @@ export function App() {
         } },
       { id: 'lab', label: 'Persona lab — compare brains', hint: 'experiment', run: () => setLab(true) },
       { id: 'new-room', label: 'New room…', hint: 'action', run: () => setRoomSheet({ room: null }) },
+      { id: 'load-exp', label: 'Load an experiment file…', hint: 'jsonc', run: () => setLoadExp(true) },
       { id: 'new-agent', label: 'New researcher…', hint: 'action', run: () => setAgentSheet({ agent: null }) },
       { id: 'cast', label: 'Edit this room\u2019s cast…', hint: 'action', run: () => setRoomSheet({ room: rs.room }) },
       { id: 'copy-transcript', label: 'Copy transcript as Markdown', hint: 'action',
@@ -286,8 +289,12 @@ export function App() {
       <aside className="pane-left">
         <div className="pane-title">
           Rooms
-          <button className="pane-add" title="New room"
-                  onClick={() => setRoomSheet({ room: null })}>+</button>
+          <span className="pane-actions">
+            <button className="pane-add" title="Load an experiment file (.jsonc)"
+                    onClick={() => setLoadExp(true)}>⤓</button>
+            <button className="pane-add" title="New room"
+                    onClick={() => setRoomSheet({ room: null })}>+</button>
+          </span>
         </div>
         {rooms.map(r => (
           <div key={r.id} className={`room-row ${r.id === rs.roomId ? 'sel' : ''}`}
@@ -493,6 +500,20 @@ export function App() {
       {menu && <ContextMenu {...menu} onClose={() => setMenu(null)} />}
       {ask && <Ask spec={ask} onClose={() => setAsk(null)} />}
       {manual && <Manual onClose={() => setManual(false)} />}
+
+      {loadExp && (
+        <LoadExperiment
+          onClose={() => setLoadExp(false)}
+          onLoaded={async (roomId, question) => {
+            await rs.refreshBoot()
+            rs.setRoomId(roomId)
+            // Prefill rather than start: a run costs money, so pressing
+            // Deliberate stays a separate, deliberate act.
+            setDraft(question)
+            flash('Room ready — press Deliberate to start')
+          }}
+        />
+      )}
       {palette && <Palette commands={commands} onClose={() => setPalette(false)} />}
 
       {globalSearch && (

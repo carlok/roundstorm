@@ -13,6 +13,8 @@ import { summarise } from './deliberation/ledger.ts'
 import { renderResultMarkdown } from './deliberation/export.ts'
 import { embedderStatus, indexPending, semanticSearch } from './search/embeddings.ts'
 import { compare, createExperiment, reportArm } from './deliberation/personalab.ts'
+import { ConfigError, parseExperiment } from './headless/config.ts'
+import { setupExperiment } from './headless/run.ts'
 import type { Mode, Style, Tier } from './types.ts'
 
 export function makeApi() {
@@ -324,6 +326,40 @@ export function makeApi() {
       void replyInDm(room, message)
     }
     res.json(message)
+  })
+
+  /**
+   * Load an experiment file from the interface.
+   *
+   * The same parser and the same setup the CLI uses, so a config that works
+   * headless works here. It creates the cast and the room and stops — starting a
+   * run costs money, and that decision stays with whoever pressed the button.
+   */
+  api.post('/experiments', (req, res) => {
+    const text = typeof req.body?.config === 'string' ? req.body.config : ''
+    if (!text.trim()) return res.status(400).json({ error: 'send the file contents as "config"' })
+
+    let cfg
+    try {
+      cfg = parseExperiment(text)
+    } catch (err) {
+      // A parse failure is the user's to fix; hand back the message naming the
+      // field rather than a generic 400.
+      return res.status(400).json({ error: err instanceof ConfigError ? err.message : String(err) })
+    }
+
+    const { room, agents } = setupExperiment(cfg)
+    db.logEvent('experiment.loaded', {
+      roomId: room.id,
+      payload: { room: room.name, agents: agents.length, mode: cfg.mode, rounds: cfg.rounds },
+    })
+    res.json({
+      room, agents,
+      deliberation: {
+        mode: cfg.mode, rounds: cfg.rounds, style: cfg.style,
+        sealedOpening: cfg.sealedOpening, question: cfg.question,
+      },
+    })
   })
 
   api.post('/agents', (req, res) => {
