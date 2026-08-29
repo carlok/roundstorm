@@ -1,0 +1,4 @@
+// One experiment per line. Same personas, different brains — the comparison the
+// persona lab exists for, run headless.
+{"room":{"name":"Hysteresis — all Claude"},"agents":[{"name":"Lab A skeptic","persona":"skeptic","brain":"claude","model":"claude-haiku-4-5-20251001"},{"name":"Lab A mathematician","persona":"mathematician","brain":"claude","model":"claude-haiku-4-5-20251001"}],"question":"A rig vibrates only above 4200 rpm and stops below 3900. Oil whip or a hardening nonlinearity? Commit to one.","mode":"deliberation","rounds":2}
+{"room":{"name":"Hysteresis — mixed brains"},"agents":[{"name":"Lab B skeptic","persona":"skeptic","brain":"claude","model":"claude-haiku-4-5-20251001"},{"name":"Lab B mathematician","persona":"mathematician","brain":"agy","model":"gemini-3.5-flash-low"}],"question":"A rig vibrates only above 4200 rpm and stops below 3900. Oil whip or a hardening nonlinearity? Commit to one.","mode":"deliberation","rounds":2}

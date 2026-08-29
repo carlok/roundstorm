@@ -1,0 +1,44 @@
+// A conclave: the room cannot finish until every participant endorses one
+// position, or it reports honestly that it could not.
+//
+//   node dist-server/cli.mjs examples/conclave.jsonc
+{
+  "project": "Research",
+  "room": {
+    "name": "Sensor choice",
+    // reasoning | research | workstation | full — the last two need a workingDir.
+    "tier": "reasoning"
+  },
+
+  "agents": [
+    {
+      "name": "Alice",
+      "role": "mathematical analyst",
+      "persona": "mathematician",
+      "brain": "claude",
+      "model": "claude-haiku-4-5-20251001"
+    },
+    {
+      "name": "Bruno",
+      "role": "rigorous skeptic",
+      "persona": "skeptic",
+      "brain": "codex"          // no "model": uses the account default
+    },
+    {
+      "name": "Curie",
+      "role": "experimental scientist",
+      "persona": "experimentalist",
+      "brain": "agy",
+      "model": "gemini-3.5-flash-low"
+    }
+  ],
+
+  // Give it something with two defensible answers. A question with one obvious
+  // answer produces agreement in round 1 and teaches you nothing.
+  "question": "A field engineer must carry ONE vibration sensor: a proximity probe (displacement, needs shaft access) or an accelerometer (casing-mounted, no shaft access). Agree on exactly one to standardise on, and name the single case where your choice is worst.",
+
+  "mode": "conclave",
+  "rounds": 5,                  // for conclave this is the emergency maximum
+  "style": "parallel",
+  "sealedOpening": false
+}

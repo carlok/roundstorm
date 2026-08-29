@@ -17,12 +17,19 @@ rmSync(out, { recursive: true, force: true })
 mkdirSync(out, { recursive: true })
 
 await build({
-  entryPoints: [join(root, 'server/src/index.ts')],
+  // Two entry points: the daemon, and the headless runner that drives the same
+  // scheduler from a config file without any server at all.
+  entryPoints: [
+    join(root, 'server/src/index.ts'),
+    join(root, 'server/src/headless/cli.ts'),
+  ],
   bundle: true,
   platform: 'node',
   target: 'node22',
   format: 'esm',
-  outfile: join(out, 'index.mjs'),
+  outdir: out,
+  outExtension: { '.js': '.mjs' },
+  entryNames: '[name]',
   // Express and its dependencies are CommonJS and call require() at runtime.
   // ESM output has no require, so one has to be provided or the bundle dies on
   // the first import with 'Dynamic require of "path" is not supported'.
@@ -35,4 +42,4 @@ await build({
   logLevel: 'warning',
 })
 
-console.log('daemon bundled to dist-server/index.mjs (no native dependencies)')
+console.log('bundled to dist-server/{index,cli}.mjs (no native dependencies)')

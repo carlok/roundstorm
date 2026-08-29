@@ -16,14 +16,15 @@
     "dev:web": "vite",
     "build:web": "vite build",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test server/src/*.test.ts server/src/deliberation/*.test.ts server/src/adapters/*.test.ts server/src/sqlite/*.test.ts web/src/lib/*.test.ts",
+    "test": "tsx --test server/src/*.test.ts server/src/headless/*.test.ts server/src/deliberation/*.test.ts server/src/adapters/*.test.ts server/src/sqlite/*.test.ts web/src/lib/*.test.ts",
     "build:server": "node scripts/build-server.mjs",
     "build": "npm run build:web && npm run build:server",
     "tauri": "tauri",
     "app:dev": "tauri dev",
     "app:build": "npm run build && tauri build && npm run check:arch",
-    "coverage": "tsx --test --experimental-test-coverage server/src/*.test.ts server/src/deliberation/*.test.ts server/src/adapters/*.test.ts server/src/sqlite/*.test.ts web/src/lib/*.test.ts",
-    "check:arch": "node scripts/check-arch.mjs"
+    "coverage": "tsx --test --experimental-test-coverage server/src/*.test.ts server/src/headless/*.test.ts server/src/deliberation/*.test.ts server/src/adapters/*.test.ts server/src/sqlite/*.test.ts web/src/lib/*.test.ts",
+    "check:arch": "node scripts/check-arch.mjs",
+    "ask": "node dist-server/cli.mjs"
   },
   "dependencies": {
     "express": "^4.21.2",
