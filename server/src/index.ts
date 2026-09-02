@@ -9,9 +9,11 @@ import { makeApi } from './api.ts'
 import { bus } from './bus.ts'
 import { seedIfEmpty } from './seed.ts'
 import { probeBrains } from './adapters/registry.ts'
-import { DATA_PATH, db, logEvent } from './db.ts'
+import { DATA_PATH, db, logEvent, reconcileDeliberations } from './db.ts'
 
-const PORT = Number(process.env.PORT ?? 8787)
+// ROUNDSTORM_PORT is the documented name; PORT stays accepted because the
+// shell and older scripts set it.
+const PORT = Number(process.env.ROUNDSTORM_PORT ?? process.env.PORT ?? 8787)
 
 /**
  * Where to listen. Loopback unless explicitly told otherwise.
@@ -80,6 +82,10 @@ function findWebRoot(): string | null {
 
 const server = createServer(app)
 const wss = new WebSocketServer({ server, path: '/ws' })
+// It shares the http server, so it re-emits that server's listen failure. Left
+// unhandled, an EADDRINUSE killed the daemon with a raw stack trace from ws
+// before the readable message below could be printed.
+wss.on('error', () => {})
 
 wss.on('connection', socket => {
   const unsubscribe = bus.subscribe(event => {
@@ -116,8 +122,26 @@ function watchParent() {
   }, 3000).unref()
 }
 
+const reconciled = reconcileDeliberations()
+
+server.on('error', (err: NodeJS.ErrnoException) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`port ${PORT} is already in use — another Roundstorm daemon is probably running.`)
+    console.error(`set ROUNDSTORM_PORT to a free port, or stop the other one first.`)
+    process.exit(2)
+  }
+  if (err.code === 'EACCES') {
+    console.error(`not allowed to listen on ${HOST}:${PORT}. Ports below 1024 need privileges.`)
+    process.exit(2)
+  }
+  throw err
+})
+
 server.listen(PORT, HOST, async () => {
   watchParent()
+  if (reconciled.length) {
+    console.log(`recovered           ${reconciled.length} deliberation(s) left running by a previous exit`)
+  }
   // Print before probing. Brain discovery shells out to every CLI and
   // `cursor-agent --list-models` alone takes ~30s, so logging only afterwards
   // leaves the log file empty for half a minute after a successful start —

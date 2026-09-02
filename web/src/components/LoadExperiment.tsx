@@ -20,9 +20,18 @@ const SAMPLE = `{
  * works in CI works here. It sets up the cast and the room and stops there —
  * starting a run costs money, so that stays a separate, deliberate press.
  */
+/** Everything the file said about the run, not just the question. */
+export interface LoadedRun {
+  question: string
+  mode?: string
+  rounds?: number
+  style?: 'parallel' | 'pingpong'
+  sealedOpening?: boolean
+}
+
 export function LoadExperiment({ onClose, onLoaded }: {
   onClose: () => void
-  onLoaded: (roomId: string, question: string) => void
+  onLoaded: (roomId: string, run: LoadedRun) => void
 }) {
   const [text, setText] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -47,7 +56,7 @@ export function LoadExperiment({ onClose, onLoaded }: {
       })
       const body = await res.json()
       if (!res.ok) { setError(body.error ?? 'could not load that file'); return }
-      onLoaded(body.room.id, body.deliberation.question)
+      onLoaded(body.room.id, body.deliberation)
       onClose()
     } catch (e) {
       setError(String(e))

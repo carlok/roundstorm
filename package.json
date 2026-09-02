@@ -24,7 +24,8 @@
     "app:build": "npm run build && tauri build && npm run check:arch",
     "coverage": "tsx --test --experimental-test-coverage server/src/*.test.ts server/src/headless/*.test.ts server/src/deliberation/*.test.ts server/src/adapters/*.test.ts server/src/sqlite/*.test.ts web/src/lib/*.test.ts",
     "check:arch": "node scripts/check-arch.mjs",
-    "ask": "node dist-server/cli.mjs"
+    "ask": "node dist-server/cli.mjs",
+    "test:ui": "npm run build:web && tsx --test web/src/ui-sweep.test.ts"
   },
   "dependencies": {
     "express": "^4.21.2",
@@ -47,6 +48,7 @@
     "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^9.1.0",
     "esbuild": "^0.28.2",
+    "puppeteer-core": "^25.9.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vite": "^6.0.5"

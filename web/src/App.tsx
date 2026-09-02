@@ -3,7 +3,7 @@ import { useRoundstorm } from './store.ts'
 import { Avatar } from './components/Avatar.tsx'
 import { MessageView } from './components/MessageView.tsx'
 import { ControlBar } from './components/ControlBar.tsx'
-import { StartSheet } from './components/StartSheet.tsx'
+import { StartSheet, type StartPreset } from './components/StartSheet.tsx'
 import { SelectionBar } from './components/SelectionBar.tsx'
 import { SearchBar } from './components/SearchBar.tsx'
 import { ContextMenu, type MenuItem } from './components/ContextMenu.tsx'
@@ -35,6 +35,8 @@ export function App() {
   const [replyTo, setReplyTo] = useState<Message | null>(null)
   const [draft, setDraft] = useState('')
   const [sheet, setSheet] = useState(false)
+  // Carried from a loaded experiment file into the sheet it opens.
+  const [preset, setPreset] = useState<StartPreset | undefined>()
   const [palette, setPalette] = useState(false)
   const [search, setSearch] = useState(false)
   const [query, setQuery] = useState('')
@@ -241,7 +243,7 @@ export function App() {
         } },
     ]
     if (rs.room?.kind === 'room' && !rs.active) {
-      actions.push({ id: 'delib', label: 'Start a deliberation…', hint: 'action', run: () => setSheet(true) })
+      actions.push({ id: 'delib', label: 'Start a deliberation…', hint: 'action', run: () => { setPreset(undefined); setSheet(true) } })
     }
     if (rs.active) {
       actions.push(
@@ -384,7 +386,7 @@ export function App() {
               </button>
             )}
             {rs.room?.kind === 'room' && !rs.active && (
-              <button className="primary" onClick={() => setSheet(true)}>Deliberate…</button>
+              <button className="primary" onClick={() => { setPreset(undefined); setSheet(true) }}>Deliberate…</button>
             )}
             <button className="ghost" onClick={() => setManual(true)}
                     title="How Roundstorm works — modes, rounds, conclave (shift-?)">
@@ -504,13 +506,16 @@ export function App() {
       {loadExp && (
         <LoadExperiment
           onClose={() => setLoadExp(false)}
-          onLoaded={async (roomId, question) => {
+          onLoaded={async (roomId, d) => {
             await rs.refreshBoot()
             rs.setRoomId(roomId)
             // Prefill rather than start: a run costs money, so pressing
-            // Deliberate stays a separate, deliberate act.
-            setDraft(question)
-            flash('Room ready — press Deliberate to start')
+            // Start stays a separate, deliberate act. The file's mode, rounds
+            // and style come with it — dropping them made the run silently
+            // different from the experiment that was loaded.
+            setDraft(d.question)
+            setPreset(d)
+            setSheet(true)
           }}
         />
       )}
@@ -568,6 +573,7 @@ export function App() {
         <StartSheet
           room={rs.room} roster={roster} modes={rs.boot.modes}
           lastQuestion={[...rs.messages].reverse().find(m => m.authorType === 'human')?.body ?? ''}
+          preset={preset}
           onClose={() => setSheet(false)}
           onStart={opts => { setSheet(false); void rs.startDeliberation(opts) }}
         />

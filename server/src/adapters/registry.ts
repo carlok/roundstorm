@@ -14,6 +14,31 @@ const ADAPTERS: BrainAdapter[] = [
 export const getAdapter = (id: string): BrainAdapter | undefined =>
   ADAPTERS.find(a => a.id === id)
 
+/**
+ * Add a brain at runtime.
+ *
+ * This exists so the scheduler can be tested at all. Every path through it calls
+ * a brain, so without a way to substitute one, testing round isolation, the
+ * sealed opening, the turn deadline, cancellation or steering meant spending real
+ * money and minutes — which is why that file sat at 17% while holding most of the
+ * logic that can fail silently.
+ *
+ * Replaces an existing adapter with the same id, so a test can shadow a real one.
+ */
+export function registerAdapter(adapter: BrainAdapter): () => void {
+  const previous = ADAPTERS.findIndex(a => a.id === adapter.id)
+  const removed = previous >= 0 ? ADAPTERS.splice(previous, 1, adapter)[0] : undefined
+  if (previous < 0) ADAPTERS.push(adapter)
+  cache = null
+  return () => {
+    const at = ADAPTERS.findIndex(a => a.id === adapter.id)
+    if (at < 0) return
+    if (removed) ADAPTERS.splice(at, 1, removed)
+    else ADAPTERS.splice(at, 1)
+    cache = null
+  }
+}
+
 export interface BrainInfo {
   id: string
   label: string

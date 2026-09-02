@@ -3,19 +3,35 @@ import type { Agent, ModeInfo, Room } from '../types.ts'
 import { Avatar } from './Avatar.tsx'
 
 /** One sheet, sensible defaults, no schema editing (plan §2.5). */
-export function StartSheet({ room, roster, modes, lastQuestion, onStart, onClose }: {
+/** What an experiment file asked for, when the sheet was opened by loading one. */
+export interface StartPreset {
+  mode?: string
+  rounds?: number
+  style?: 'parallel' | 'pingpong'
+  sealedOpening?: boolean
+}
+
+export function StartSheet({ room, roster, modes, lastQuestion, preset, onStart, onClose }: {
   room: Room
   roster: Agent[]
   modes: ModeInfo[]
   /** Last thing the human said in this room, if anything. */
   lastQuestion: string
+  /**
+   * An experiment file's settings. Loading a file used to carry only the
+   * question across, so `"mode": "conclave", "rounds": 5` silently became a
+   * four-round deliberation — the run looked right and was not the experiment.
+   * They are still shown in the form rather than started, so the file's choices
+   * are visible and editable before anything is spent.
+   */
+  preset?: StartPreset
   onStart: (opts: Record<string, unknown>) => void
   onClose: () => void
 }) {
-  const [mode, setMode] = useState('deliberation')
-  const [rounds, setRounds] = useState(4)
-  const [style, setStyle] = useState<'parallel' | 'pingpong'>('parallel')
-  const [sealedOpening, setSealed] = useState(true)
+  const [mode, setMode] = useState(preset?.mode ?? 'deliberation')
+  const [rounds, setRounds] = useState(preset?.rounds ?? 4)
+  const [style, setStyle] = useState<'parallel' | 'pingpong'>(preset?.style ?? 'parallel')
+  const [sealedOpening, setSealed] = useState(preset?.sealedOpening ?? true)
   // Prefilled rather than left blank with a note saying the blank means
   // something. If you already typed the question into the composer, it is here;
   // if you did not, this is the only place you need to type it.

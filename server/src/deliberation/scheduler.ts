@@ -24,7 +24,6 @@ import { TURN_SCHEMA, coerceTurn, extractJson, stripJsonBlock } from './contract
 interface Running {
   deliberation: Deliberation
   controller: AbortController
-  extend: (by: number) => void
   interrupt?: boolean
 }
 
@@ -52,6 +51,10 @@ export function interruptDeliberation(id: string) {
   const r = running.get(id)
   if (!r) return
   db.logEvent('deliberation.interrupted', { deliberationId: id })
+  // Read by runRounds, which replaces the controller and repeats the round with
+  // the steer included. Without this the abort simply ended the deliberation,
+  // while the button and the manual both promised a restart — and the turns
+  // already in flight were billed for nothing.
   r.interrupt = true
   r.controller.abort()
 }
@@ -79,7 +82,7 @@ function setActivity(roomId: string, agentId: string, state: any, detail: string
 
 export async function startDeliberation(deliberation: Deliberation) {
   const controller = new AbortController()
-  running.set(deliberation.id, { deliberation, controller, extend: () => {} })
+  running.set(deliberation.id, { deliberation, controller })
   db.logEvent('deliberation.started', {
     roomId: deliberation.roomId, deliberationId: deliberation.id,
     payload: { mode: deliberation.mode, rounds: deliberation.rounds, style: deliberation.style },
@@ -90,7 +93,7 @@ export async function startDeliberation(deliberation: Deliberation) {
     if (deliberation.mode === 'conclave') {
       await runConclave(deliberation.id, controller.signal, runTurn)
     } else {
-      await runRounds(deliberation.id, controller.signal)
+      await runRounds(deliberation.id, running.get(deliberation.id)!.controller.signal)
     }
     await synthesise(deliberation.id, controller.signal)
   } catch (err) {
@@ -134,7 +137,7 @@ async function runRounds(deliberationId: string, signal: AbortSignal) {
     // Everything visible before this round starts. In parallel style this snapshot
     // is shared by every agent in the round; nothing produced now leaks backwards.
     const baseHistory = db.listMessages(d.roomId, false).filter(m => m.round == null || m.round < round)
-    const steers = pendingSteers(d.roomId, round)
+    const steers = pendingSteers(d.roomId)
 
     for (const a of roster) setActivity(room.id, a.id, 'waiting', 'Waiting', round)
 
@@ -161,21 +164,43 @@ async function runRounds(deliberationId: string, signal: AbortSignal) {
       db.logEvent('round.revealed', { roomId: d.roomId, deliberationId: d.id, payload: { round } })
     }
 
+    // An interrupt abandons the round and repeats it with the human's steer
+    // included, which is what the button promises. Reaching this with the flag
+    // still set used to mean the abort simply ended the deliberation. The steer
+    // must survive too, so this returns before markSteersConsumed.
+    const entry = running.get(deliberationId)
+    if (entry?.interrupt) {
+      entry.interrupt = false
+      entry.controller = new AbortController()
+      signal = entry.controller.signal
+      db.logEvent('round.restarted', { deliberationId, payload: { round } })
+      round -= 1
+      continue
+    }
+
     markSteersConsumed(steers)
     if (signal.aborted) return
   }
 }
 
-/** Human messages since the last round that agents have not yet been shown (plan §8). */
-function pendingSteers(roomId: string, round: number): Message[] {
+/**
+ * Human messages the agents have not been shown yet (plan §8).
+ *
+ * `priority` is the unconsumed flag. It used to be tracked in a module-level Set
+ * that nothing ever read, so a steer sent during round 2 was re-injected as
+ * "address this before anything else" at rounds 3, 4 and 5 — the room kept
+ * re-answering an instruction it had already dealt with, and every later round
+ * was quietly degraded. Consuming it in the database also survives a restart,
+ * which the Set never could.
+ */
+function pendingSteers(roomId: string): Message[] {
   return db.listMessages(roomId)
     .filter(m => m.authorType === 'human' && m.priority && m.round == null)
     .slice(-3)
 }
 
-const consumed = new Set<string>()
 function markSteersConsumed(steers: Message[]) {
-  for (const s of steers) consumed.add(s.id)
+  for (const s of steers) db.updateMessage(s.id, { priority: false })
 }
 
 export async function runTurn(args: {

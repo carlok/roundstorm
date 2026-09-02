@@ -426,10 +426,11 @@ export function updateMessage(id: string, patch: Partial<Message> & { raw?: stri
   const cur = getMessage(id)
   if (!cur) return undefined
   const next = { ...cur, ...patch }
-  db.prepare(`UPDATE messages SET body=?, sealed=?, stance=?, claims=?, degraded=?, cost_usd=?, raw=COALESCE(?,raw)
-              WHERE id=?`)
-    .run(next.body, next.sealed ? 1 : 0, next.stance, JSON.stringify(next.claims),
-         next.degraded ? 1 : 0, next.costUsd, patch.raw ?? null, id)
+  db.prepare(`UPDATE messages SET body=?, sealed=?, priority=?, stance=?, claims=?, degraded=?,
+              cost_usd=?, raw=COALESCE(?,raw) WHERE id=?`)
+    .run(next.body, next.sealed ? 1 : 0, next.priority ? 1 : 0, next.stance,
+         JSON.stringify(next.claims), next.degraded ? 1 : 0, next.costUsd,
+         patch.raw ?? null, id)
   return getMessage(id)
 }
 
@@ -483,6 +484,34 @@ export const activeDeliberation = (roomId: string): Deliberation | undefined => 
   const r = db.prepare(`SELECT * FROM deliberations WHERE room_id=? AND status IN ('running','stopping')
                         ORDER BY created_at DESC LIMIT 1`).get(roomId)
   return r ? toDeliberation(r) : undefined
+}
+
+/**
+ * A crash leaves deliberations at `running` or `stopping` forever. Nothing in
+ * the process is driving them any more, but `activeDeliberation` still returns
+ * one, and every route that guards on it — deliberate, clear, delete, rename —
+ * refuses. The room is bricked, with no way out from the interface.
+ *
+ * So at startup, before anything can query it, close every deliberation the
+ * scheduler is demonstrably not running, and say so in the room rather than
+ * letting a run appear to have finished normally.
+ */
+export function reconcileDeliberations(): Deliberation[] {
+  const stale = (db.prepare(`SELECT * FROM deliberations WHERE status IN ('running','stopping')`)
+    .all() as any[]).map(toDeliberation)
+
+  for (const d of stale) {
+    updateDeliberation(d.id, { status: 'stopped', endedAt: now() })
+    insertMessage({
+      roomId: d.roomId, authorType: 'system', deliberationId: d.id,
+      body: `This deliberation was interrupted at round ${d.currentRound} — Roundstorm stopped `
+          + `while it was running. Nothing after that round was recorded. Start a new one when ready.`,
+    })
+    logEvent('deliberation.reconciled', {
+      roomId: d.roomId, deliberationId: d.id, payload: { was: d.status, round: d.currentRound },
+    })
+  }
+  return stale
 }
 
 export const listDeliberations = (roomId: string): Deliberation[] =>

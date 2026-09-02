@@ -117,11 +117,14 @@ async function narrate(args: {
       : undefined,
   }
 
-  // Any capable brain will do; pick one that is not in the room if possible, so
-  // the synthesiser has no side to defend.
+  // The report is parsed, not read, so prefer a brain that enforces the schema
+  // over whichever agent happens to sit first in the roster. Among equals the
+  // room's own brains are fine — a synthesiser has no position to defend, it
+  // narrates the ledger it is handed.
   const brains = [...new Set(roster.map(a => a.brain))]
-  const synthBrain = brains[0] ?? 'claude'
-  const adapter = getAdapter(synthBrain)
+  const adapter = brains.map(getAdapter).filter(a => a != null)
+    .sort((a, b) => Number(b!.schemaEnforced) - Number(a!.schemaEnforced))[0]
+    ?? getAdapter('claude')
   if (!adapter) return base
 
   const nameOf = (id: string | null) => roster.find(a => a.id === id)?.name ?? 'Human'
@@ -177,7 +180,7 @@ ${transcript}`
   try {
     for await (const ev of adapter.run({
       systemPrompt, userPrompt,
-      model: roster.find(a => a.brain === synthBrain)?.model ?? null,
+      model: roster.find(a => a.brain === adapter.id)?.model ?? null,
       tier: 'reasoning', workingDir: null,
       schema: schemaFor(adapter, RESULT_SCHEMA),
     }, signal)) {

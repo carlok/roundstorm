@@ -720,3 +720,369 @@ Two tracks, run every sprint.
 Run one real research question end to end and read the whole transcript. The acceptance question is not "did it run" but **"did I learn something I wouldn't have learned from one model?"** If sprint 3's four-brain room doesn't beat asking Claude alone, the thesis needs revisiting before building sprints 4–7.
 
 **Sprint-7 acceptance = the brief's central product test**, verbatim: four agents on four *different model families*, deliberation, 5 rounds, parallel, mid-flight steer, tool use, web search, memory recall, result card, and the whole thing searchable afterwards.
+
+---
+
+## Cross-platform port — Ubuntu 26 and Windows 11
+
+### Context
+
+The product is macOS-only today, and the question is whether it is ready to install
+on Ubuntu 26 and Windows 11. It is not. But the gap is smaller than it was a week
+ago, and almost none of what remains is architectural.
+
+Two earlier decisions did most of the work already. Dropping `better-sqlite3` for
+`node:sqlite` removed the only native artifact in the shipped bundle, so the daemon
+is now a single 1.4 MB pure-JavaScript file that runs anywhere Node 22.5+ does.
+And every brain is reached through one adapter interface, so a platform where only
+`claude` and `codex` exist degrades to a smaller brain list rather than breaking —
+the registry already greys out what it cannot find.
+
+What is left is a long tail of macOS assumptions, most of them mechanical, plus one
+genuine unknown per platform that no amount of planning settles.
+
+**The binding constraint: I cannot test either target.** Everything below is either
+verifiable on macOS or has to be verified by someone on the actual machine. Given
+how many confident calls in this project turned out wrong when finally run — the
+Node 8 pick, the traffic lights swallowing clicks, `window.prompt` returning null,
+`streamProcess` losing PATH — the plan should be read as "what to try", not "what
+will work".
+
+### Recommended: browser first, desktop shell later
+
+**The Tauri shell is the only macOS-locked part of this product.** The daemon is
+pure JavaScript and the UI is a static bundle; neither knows what platform it is
+on. So the cheapest route to Ubuntu and Windows is to stop shipping a desktop app
+and start shipping a local web server — the same thing `npm run dev` already does,
+minus Vite.
+
+One piece is missing. `server/src/index.ts:15-16` mounts `/api` and `/health` and
+nothing else, so the daemon has no way to hand anyone the built UI. Adding
+`express.static('dist-web')` with an SPA fallback is roughly five lines, and after
+that:
+
+```bash
+npm install && npm run build
+node dist-server/index.mjs      # then open http://127.0.0.1:8787
+```
+
+That works on macOS, Ubuntu and Windows from one command, with no Rust toolchain,
+no WebKitGTK, no WebView2, no signing, and no CI matrix.
+
+**What it removes from the port entirely:**
+
+| Problem | Why it disappears |
+|---|---|
+| Node discovery in Rust (`main.rs:142-164`) | The user runs `node` themselves. |
+| Titlebar inset, drag strip, window-control side | A browser draws its own chrome; `--titlebar` stays 0. |
+| `check:arch`, Mach-O, `plutil`, code signing | No bundle to check or sign. |
+| WebKitGTK / WebView2 / GTK deps | No embedded webview. |
+| Orphan watchdog (`index.ts:29-49`) | No parent process to be orphaned from; Ctrl-C ends it. |
+| The whole CI release matrix | Nothing per-platform to build. |
+| `window.prompt` / download quirks | Real browser semantics, which is what the code was written against in the first place. |
+
+**Ubuntu is then almost free.** It is POSIX, the paths mostly work, and
+`ROUNDSTORM_DATA` already exists as an override, so today's build would run with:
+
+```bash
+ROUNDSTORM_DATA=~/.local/share/roundstorm node dist-server/index.mjs
+```
+
+Realistically: static serving plus an XDG-aware default in `server/src/db.ts:12`,
+and Ubuntu is done. Everything else in the catalogue below is Windows.
+
+**Windows still needs the daemon fixes** — `PATHEXT` and `.cmd` shims in
+`resolve.ts`, shell handling in `spawn.ts`, no `SIGTERM`, the codex symlink, and
+the argv length ceiling. Those are unavoidable because they are about spawning the
+brains, not about packaging. But they are a much smaller surface than
+daemon-plus-shell, and each is independently testable.
+
+### Why not a container
+
+Podman or Docker looks like the obvious cheap answer and is the wrong tool here,
+for a reason specific to this product: **the daemon's job is to spawn CLIs that
+live on the host and authenticate as the host user.** Verified — it resolves
+`~/.nvm/.../claude`, `~/.local/bin/codex`, `~/.local/bin/agy`, and reads
+`~/.codex/auth.json` (`codex.ts:34,144`).
+
+Containerising it means mounting the user's home directory, their PATH, and their
+provider credentials into the container. At that point the container isolates
+nothing, adds a layer to debug, and breaks the one thing it was supposed to
+help with — because the CLIs are exactly what is not portable inside it.
+
+A container makes sense only for a variant that drops the CLI brains and runs on
+HTTP brains alone (DeepSeek, or LM Studio on the host network). That is a coherent
+product, but it is a different one: the CLI brains and their tool access are the
+differentiator.
+
+### Order, revised for ROI
+
+1. **Serve the UI from the daemon.** Five lines. Immediately makes the product
+   runnable anywhere Node runs, including on this machine without Tauri.
+2. **XDG / `%APPDATA%` data dir** (`db.ts:12`). One function.
+3. **Fix the Node floor mismatch** (below). Independent of everything.
+4. **Ship Ubuntu.** Expected to work after 1–2; verify on the real machine.
+5. **Windows daemon fixes** — `PATHEXT`, shell spawn, `SIGTERM`, symlink, argv
+   length. The actual work, and the part I would be writing blind.
+6. **Tauri for Linux/Windows only if the browser version proves worth packaging.**
+   Wanting a Dock icon is a reason; nothing else here is.
+
+Steps 1–3 are perhaps an hour and are verifiable on macOS. That is the whole ROI
+argument: the cheapest change unlocks two platforms and deletes most of the
+catalogue below.
+
+### A bug to fix regardless of any port
+
+`src-tauri/src/main.rs:110` sets `MIN_NODE_MAJOR = 20`, while `package.json`
+declares `engines: node >= 22.5`. `node:sqlite` landed in 22.5, so the shell will
+happily select a Node 20 or 21 and the daemon will die on import with no useful
+message. This is a live defect on macOS today, introduced by the storage migration,
+and it only surfaces on a machine whose newest Node is older than this one's.
+
+### What already ports
+
+- The daemon bundle: pure JS, no native modules, `node:sqlite` is cross-platform.
+- The brain adapter interface, and the availability probe that hides missing CLIs.
+- All four CLI brains exist on all three platforms — Claude Code runs natively on
+  Windows 10 1809+ and Ubuntu 20.04+; `agy` is a single Go binary for macOS, Linux
+  and Windows; `codex` and `cursor-agent` cover Linux and Windows.
+- Icons: `icon.icns` and `icon.ico` are both already generated.
+- `scripts/build-server.mjs` uses `node:path` throughout.
+
+### What has to change — full catalogue
+
+Most of this applies only if the desktop shell is ported. The browser path above
+deletes the Rust, window-chrome, build-script and CI rows outright; what survives
+is the daemon work, which is items 1, 2, 3, 6 and 7.
+
+
+**1. Path and environment assumptions.** There is currently *zero* platform
+branching anywhere in `server/src` or `web/src`. The places that need it:
+
+| File | Problem |
+|---|---|
+| `server/src/db.ts:12` | Data dir hardcodes `~/Library/Application Support`. Needs XDG (`$XDG_DATA_HOME`) on Linux, `%APPDATA%` on Windows. |
+| `server/src/adapters/resolve.ts:27-59` | Search dirs are macOS/Unix only; `accessSync(X_OK)` is unreliable on Windows and there is no `PATHEXT` probing, so `claude.cmd` and `codex.exe` are never found and every brain reports missing. |
+| `src-tauri/src/main.rs:142-164` | Node discovery hardcodes Homebrew paths, splits `PATH` on `:` (wrong and destructive on `C:\…`), reads `HOME` (Windows uses `USERPROFILE`), and looks for `node` not `node.exe`. |
+| `server/src/api.ts:177` | Backup defaults to `~/Downloads`, which is not the registry-configured folder on Windows nor guaranteed under XDG on Linux. |
+
+**2. Process handling.** `server/src/adapters/spawn.ts` spawns without `shell: true`,
+which cannot launch the `.cmd` shims npm installs on Windows since the CVE-2024-27980
+fix. `SIGTERM` does not exist there, so cancelling a turn becomes a hard kill and the
+CLIs' own child processes (they spawn node and git themselves) are orphaned. And
+`server/src/index.ts:29-49` detects orphaning via `process.ppid === 1`, which is a
+Unix reparenting rule — on Windows the watchdog never fires and the daemon holds
+port 8787 after a crash.
+
+**3. Command-line length.** Every adapter passes the full prompt as argv
+(`claude.ts:82`, `codex.ts:76`, `agy.ts:50`, `cursor.ts:65`). Windows caps a command
+line at ~32 KB, and ~8 KB through a `cmd` shim. A five-round transcript will exceed
+that. This is the one item that may force a design change rather than a fix: the
+likely answer is stdin, which `agy` and `claude` both support via
+`--input-format stream-json`.
+
+**4. Window chrome.** `tauri.conf.json:20-21` uses `titleBarStyle: Transparent` and
+`hiddenTitle`, both macOS-only. `web/src/lib/api.ts:41-47` then reserves a 30px inset
+whenever running under Tauri regardless of platform, so Linux and Windows would get
+30px of dead space *below* a real titlebar. Worse, `.titlebar-drag` is pinned
+top-left at 232px wide — sized for traffic lights. Windows draws its controls
+top-**right**, so that strip would sit over the Inspector tabs and swallow clicks
+there, which is exactly the bug that already cost a round trip on macOS.
+
+**5. Build and scripts.** `npm run app:build` calls `check:arch`, which uses `file`
+and `plutil` and greps for Mach-O — it will fail the build on any other platform.
+`npm test` relies on shell glob expansion, which `cmd.exe` does not do. `scripts/ask.sh`
+needs bash, curl and jq.
+
+**6. Codex isolation breaks silently on Windows.** `codex.ts:37` symlinks `auth.json`
+into an isolated `CODEX_HOME`; Windows needs Developer Mode or admin for that, and
+the call is inside a bare `try {} catch {}`. It will fail quietly and codex will run
+unauthenticated with no explanation — the same silent-failure shape as the conclave
+that reported a holdout for an agent that never started. Copy-with-refresh, or skip
+isolation on Windows and accept the token cost.
+
+**7. Sandbox honesty.** Capability tiers map to codex's seatbelt on macOS and Landlock
+on Linux; on Windows the equivalent is weaker or absent. The manual already hedges
+Cursor's advisory sandbox. It would need to hedge per platform, or the tier should
+refuse to offer Full local where it cannot be enforced.
+
+### Verification
+
+Nothing here is verifiable end to end from this machine. What is:
+
+- The Node floor fix, and every platform branch, by unit test — assert that the
+  Windows branch returns `%APPDATA%` and probes `PATHEXT`, without being on Windows.
+  `resolve.test.ts` already fakes a stub `PATH`; the same shape works for platform.
+- Existing tests must keep passing on macOS: `resolve.test.ts` currently asserts
+  `/opt/homebrew/bin` is present, which will fail on Linux and needs relaxing.
+
+What must be verified on the actual machine, in this order: the app launches and
+the window renders; the daemon starts and is reachable; brains resolve; one DM turn
+completes; a two-round deliberation completes; quit leaves no orphaned daemon.
+
+### Honest scope
+
+Steps 1–3 are perhaps a day, mostly mechanical, and Linux has a fair chance of
+working on first run. Step 4 is the uncertain one: not because any single item is
+hard, but because Windows is where every assumption in this codebase is wrong at
+once, and I would be writing it blind. The realistic outcome is a build that starts
+and then fails somewhere specific that only running it reveals.
+
+
+---
+
+## Improvement round — defects and the harness that should have caught them
+
+### Context
+
+The product works and ships, but the last stretch has been a run of bugs found by
+the user rather than by the project: the traffic-light strip swallowing clicks, the
+drag strip covering the Inspector tabs, the palette hiding its own actions, the
+manual with no visible way in, a 44 MB README pushed to GitHub. Each was cheap to
+fix and none was caught by anything automated.
+
+Looking for what else is dangling turned up two defects of the same kind — wrong,
+silent, and in code no test executes. This round fixes those and then builds the
+one piece of test infrastructure that would have caught them, rather than adding
+tests around the edges of the parts that already work.
+
+### What is actually broken
+
+**1. A human steer is re-injected every round, for ever.**
+`scheduler.ts:176-178` keeps a `consumed` set of steer ids. Nothing ever reads it.
+`pendingSteers` (`:170-174`) filters on `authorType === 'human' && priority &&
+round == null`, and nothing anywhere clears `priority` — confirmed across `db.ts`,
+`api.ts` and `scheduler.ts`.
+
+So a steer sent during round 2 of a five-round run is handed to every agent again
+at rounds 3, 4 and 5, each time labelled `PRIORITY — from the human` with
+"Address this before anything else." The room keeps re-answering an instruction it
+already dealt with, and the later rounds are quietly degraded. The dead `consumed`
+set is the evidence that this was meant to be prevented and never wired up.
+
+*Fix:* mark steers consumed against the deliberation and round in the database
+rather than in a module-level set that vanishes on restart, and filter on it.
+
+**2. The daemon dies on a taken port with a raw stack trace.**
+`index.ts` has no `error` handler on the server, so `EADDRINUSE` is an unhandled
+exception. This bit twice during development in a worse form than a crash: the
+daemon died, the API calls silently went to an *older* daemon still holding 8787,
+and the symptom was a 404 on an endpoint that demonstrably existed.
+
+*Fix:* handle the error, say which process holds the port and that another
+Roundstorm is probably already running, and exit cleanly.
+
+**3. The synthesiser brain is whichever comes first.**
+`synthesis.ts:123` picks `brains[0]`. A room whose first brain is small or
+schema-less gets a weak rapporteur — already observed once, where a local model
+returned the agreement level as the conclusion and the guard in `pickConclusion`
+had to catch it.
+
+*Fix:* prefer a schema-enforcing brain, and among those the one whose turns
+degraded least in the run being summarised.
+
+### The gap that let them through
+
+`scheduler.ts` is at **16.75% of lines** and holds round isolation, the sealed
+opening, the per-turn timeout, cancellation, tier resolution and steering. It is
+the least-tested and most consequential file in the project, and the reason is
+mechanical: every path through it calls a real brain, so testing it has meant
+spending money and minutes.
+
+`getAdapter` reads a private `ADAPTERS` array (`registry.ts:9-15`) with no way to
+register another, so a test cannot substitute a fake.
+
+**The one change that unlocks the rest:** a `registerAdapter()` on the registry,
+and a stub brain that returns scripted turns instantly. With that, the whole
+scheduler becomes deterministically testable with no model calls — and the steer
+bug above becomes a three-line test.
+
+### Plan
+
+1. **Stub-brain harness first.** `registerAdapter()` in `registry.ts`, plus a test
+   fixture that returns canned structured turns and can be told to hang (for the
+   timeout) or fail (for the system-message path). This is the enabling step;
+   everything else in the section leans on it.
+
+2. **Scheduler tests** covering what nothing currently executes:
+   parallel isolation asserted at the scheduler rather than the composer;
+   ping-pong ordering and its rotation; the sealed round staying hidden until
+   reveal; a hung brain hitting the per-turn deadline while the round continues;
+   `stop` and `interrupt` mid-flight; a steer reaching exactly one round.
+
+3. **Fix the three defects**, each with the regression test written first — the
+   steer test in particular should fail against today's code.
+
+4. **UI regression guard.** The three interface bugs were all geometry or
+   truncation, which jsdom cannot see because it has no box model. Add
+   `puppeteer-core` (dev only; drives the Chrome already installed) and one
+   headless check that loads the production bundle and asserts: no interactive
+   element is covered by another at either titlebar inset, every palette action is
+   reachable, and each Inspector tab responds. That is precisely the sweep run by
+   hand after each of those bugs — worth keeping.
+
+### Verification
+
+- `npm test` — the new scheduler tests must fail before step 3 and pass after.
+- The steer test specifically: a two-round run where a steer is added before round
+  2 must show the steer in round 2's composed context and **not** in round 3's.
+- `node dist-server/cli.mjs examples/conclave.jsonc --dry-run` still parses.
+- One real two-round deliberation on Haiku, to confirm the harness has not changed
+  live behaviour.
+- Fresh clone from GitHub, `npm ci && npm test && npm run build`, as before.
+
+### Deliberately not in this round
+
+CI, Windows-runnable test globs, and per-platform keyboard labels — all real, none
+of them the reason bugs are reaching the user. Coverage of the CLI adapters stays
+low on purpose: their failures are stub PATHs and rejected flags, which mocking
+cannot find.
+
+## Improvement round — bugs, and the harness that finds them
+
+Scope chosen deliberately: defects plus the test infrastructure able to catch
+their kind. Not CI, not Windows test globs.
+
+**The enabling change** is `registerAdapter()` plus a stub brain. Every scheduler
+path calls a model, which is why the most consequential file in the codebase sat
+at 17% coverage while holding round isolation, the sealed opening, the turn
+deadline, cancellation and human steering. The stub answers instantly and records
+what it was shown — and *what an agent was given* is a fact, while what it said
+is not, which is what makes isolation assertable at all.
+
+Written first, it failed on its first run and named three real bugs:
+
+- **A steer was re-injected forever.** `priority` is the unconsumed flag, but
+  `updateMessage` never listed the column in its `SET`, so clearing it was a
+  no-op. A steer sent at round 2 arrived as "address this before anything else"
+  at rounds 3, 4 and 5.
+- **Interrupt ended the run instead of restarting the round.** The flag was set
+  and never read. The button and the manual both promise a restart with the steer
+  included; the turns already in flight were billed for nothing.
+- **The synthesiser took `brains[0]`.** The report is parsed, not read, so a
+  prompt-and-parse brain sitting first in the roster could drop the whole
+  narration back to the unnarrated skeleton. It now prefers a schema-enforcing
+  brain.
+
+**Startup reconciliation.** A crash left deliberations at `running` forever.
+Nothing drove them, but `activeDeliberation` still returned one and every route
+guarding on it refused — the room could not deliberate, be cleared, or be
+deleted, with no way out from the interface. `reconcileDeliberations()` closes
+them before the first request is served and says so in the room, rather than
+letting an abandoned run look like one that finished.
+
+**`EADDRINUSE` printed a raw stack trace** from `ws`, which shares the http
+server and re-emitted its listen error first. It now names the likely cause. The
+port variable is `ROUNDSTORM_PORT`, as documented; `PORT` stays accepted.
+
+**Loading an experiment file kept only the question.** `"mode": "conclave",
+"rounds": 5` silently became a four-round deliberation: the run looked right and
+was not the experiment. The file's settings now open the start sheet pre-filled,
+visible and editable before anything is spent.
+
+**The UI sweep** (`npm run test:ui`) is the guard for the class of bug that kept
+reaching the user and never a test: a control that renders perfectly and cannot
+be clicked. It builds the bundle, starts the daemon, drives headless Chrome and
+asks of every control what a click at its centre would actually hit. It covers a
+control on purpose first and fails if it does not notice — an earlier version of
+this file would have passed against a page that rendered nothing.

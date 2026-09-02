@@ -135,17 +135,17 @@ the real install locations and the spawned brains get an enriched `PATH` of thei
 own, because they shell out too.
 
 Not signed or notarised: that needs an Apple Developer certificate, so the first
-launch requires right-click → Open. Making the bundle fully self-contained means
-removing the one native dependency (`better-sqlite3`); Node's built-in
-`node:sqlite` would do it, but it is still flagged experimental.
+launch requires right-click → Open. The bundle has no native dependencies —
+storage is Node's built-in `node:sqlite`.
 
 ```bash
-npm test          # 115 tests
+npm test          # 128 tests
 npm run coverage  # the same, with a coverage report
 npm run typecheck
+npm run test:ui   # the browser sweep; needs a build and a Chrome
 ```
 
-Coverage sits around **70% of lines, 84% of branches** overall, and that average
+Coverage sits around **79% of lines, 84% of branches** overall, and that average
 is not the interesting number. The split is deliberate:
 
 | Area | Lines | Why |
@@ -154,12 +154,20 @@ is not the interesting number. The split is deliberate:
 | `deliberation/ledger.ts` | 88% | The consensus level is computed here; a wrong answer is silent. |
 | `deliberation/conclave.ts` | 89% | Unanimity, endorsement expiry, the cap. |
 | `deliberation/context.ts` | 93% | Round isolation is asserted against the composed prompt. |
-| `db.ts` | 88% | |
+| `db.ts` | 94% | Includes closing out deliberations a crash left `running`, which otherwise brick a room permanently. |
 | `adapters/platform.ts` | 94% | Every Windows rule lives here — PATHEXT, `.cmd` shims, the command-line ceiling — and none of it can be exercised on macOS except by test. |
 | `headless/config.ts` | 80% | Rejecting a bad experiment file before anything is created or billed. |
 | `adapters/resolve.ts`, `spawn.ts` | 75–87% | Binary resolution and process launch. Twice now a silent regression here removed an agent from a room without saying so. |
 | the CLI adapters | 20–35% | Each is a subprocess and a JSON translation. Their real failures — a stub PATH, a rejected flag, a schema dialect — are found by running the CLI, not by mocking it. |
-| `scheduler.ts`, `synthesis.ts` | 17–22% | Orchestration over live model calls. The parts worth asserting (workspace scoping, round isolation) are extracted and tested; the loops around them were verified by running them. |
+| `scheduler.ts` | 91% | Was 17%: every path calls a brain, so it went untested while holding round isolation, the sealed opening, the turn deadline, cancellation and steering. A stub brain that answers instantly and records what it was shown made it assertable — and caught three live bugs on the first run. |
+| `synthesis.ts` | 93% | |
+
+One test is not a unit test at all. `npm run test:ui` builds the bundle, starts
+the daemon and drives headless Chrome, asking of every control: *what would a
+click here actually hit?* Reading the DOM never caught the transparent titlebar
+strip that swallowed the Rooms `+` and then the Inspector tabs — the button is
+present, styled and in the tree either way. It also self-tests, covering a
+control on purpose and failing if the sweep does not notice.
 
 The rule applied throughout: **test the things that fail silently.** A wrong
 consensus level or a lost claim looks like a working product. A broken adapter
