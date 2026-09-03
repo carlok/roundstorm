@@ -138,8 +138,8 @@ export function composeContext(args: {
     `Round ${round} of ${deliberation.rounds}. Style: ${deliberation.style === 'parallel' ? 'parallel (everyone answers at once)' : 'ping-pong (sequential)'}.`,
   ].join('\n'))
 
-  const memory = add('memory', renderMemory(agent))
-  const ledger = add('ledger', renderLedger(room.id, roster))
+  const memory = add('memory', renderMemory(agent, room.projectId))
+  const ledger = add('ledger', renderLedger(room.id, roster, deliberation.id))
   const sources = add('sources', renderSources(room.id))
   const transcript = add('transcript', renderHistory(history, roster))
   const steerText = add('steer', steers.length
@@ -181,8 +181,16 @@ If you are abandoning something you argued for earlier, set your stance to "conc
 }
 
 /** Accepted cards only. Proposals live in the inbox until a human keeps them. */
-function renderMemory(agent: Agent): string {
-  const cards = listMemory({ agentId: agent.id, status: 'accepted' }).slice(0, 25)
+/**
+ * What this agent remembers — from this project.
+ *
+ * Cards are proposed with `scope: 'project'`, but nothing filtered on it, so an
+ * accepted card from any project was injected into every room the agent joined.
+ * A conclusion from unrelated work is worse than no memory: it reads as
+ * established context and nobody in the room can tell where it came from.
+ */
+function renderMemory(agent: Agent, projectId: string): string {
+  const cards = listMemory({ agentId: agent.id, status: 'accepted', projectId }).slice(0, 25)
   if (!cards.length) return ''
   return ['# What you remember from earlier work', '',
     ...cards.map(c => `- [${c.type}] ${c.text}`)].join('\n')

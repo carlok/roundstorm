@@ -9,6 +9,7 @@ import { bus } from '../bus.ts'
 import { getAdapter, schemaFor } from '../adapters/registry.ts'
 import { personaByKey } from './personas.ts'
 import { TURN_SCHEMA, coerceTurn, extractJson, stripJsonBlock } from './contract.ts'
+import { TURN_TIMEOUT_MS } from './scheduler.ts'
 
 export async function replyInDm(room: Room, trigger: Message) {
   const agent = room.memberIds[0] ? db.getAgent(room.memberIds[0]) : undefined
@@ -47,7 +48,13 @@ export async function replyInDm(room: Room, trigger: Message) {
     payload: { dm: true, brain: agent.brain, model: agent.model, systemPrompt, userPrompt },
   })
 
+  // The scheduler gives every turn a deadline; a DM had none. A brain that hung
+  // left the generator awaiting forever and the agent stuck on "Thinking", with
+  // no way to clear it short of restarting the daemon.
   const controller = new AbortController()
+  let timedOut = false
+  const deadline = setTimeout(() => { timedOut = true; controller.abort() }, TURN_TIMEOUT_MS)
+
   let text = '', structured: unknown = null, costUsd: number | undefined, err: string | null = null
 
   try {
@@ -63,7 +70,10 @@ export async function replyInDm(room: Room, trigger: Message) {
     }
   } catch (e) {
     err = String(e)
+  } finally {
+    clearTimeout(deadline)
   }
+  if (timedOut) err = `no reply within ${Math.round(TURN_TIMEOUT_MS / 1000)}s`
 
   emitActivity(room.id, agent.id, 'idle', '')
 
@@ -77,6 +87,9 @@ export async function replyInDm(room: Room, trigger: Message) {
     return
   }
 
+  // `api.ts` calls this with `void`, so anything thrown from here on was an
+  // unhandled rejection — which, with no process handler, ended the daemon.
+  try {
   const parsed = coerceTurn(structured ?? extractJson(text), stripJsonBlock(text))
   const message = db.insertMessage({
     roomId: room.id, authorType: 'agent', authorId: agent.id,
@@ -89,6 +102,9 @@ export async function replyInDm(room: Room, trigger: Message) {
     payload: { messageId: message.id, degraded: parsed.degraded, costUsd },
   })
   bus.emit({ type: 'message', message })
+  } catch (e) {
+    db.logEvent('turn.failed', { roomId: room.id, agentId: agent.id, payload: { error: String(e) } })
+  }
 }
 
 function emitActivity(roomId: string, agentId: string, state: any, detail: string) {

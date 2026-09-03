@@ -43,7 +43,7 @@ export async function synthesise(deliberationId: string, signal: AbortSignal): P
   const messages = db.listMessages(d.roomId).filter(m => m.deliberationId === d.id)
   if (!messages.length) return null
 
-  const ledger = summarise(d.roomId, roster)
+  const ledger = summarise(d.roomId, roster, d.id)
   const level = resolveLevel(d, ledger.level)
 
   const card = await narrate({ d, room: room.name, roster, messages, level, ledger, signal })

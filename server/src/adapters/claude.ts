@@ -20,7 +20,7 @@ import type { AdapterEvent, BrainAdapter, TurnRequest } from './types.ts'
 import type { Tier } from '../types.ts'
 import { resolveBin, spawnEnv } from './resolve.ts'
 import { checkCommandLine, needsShell } from './platform.ts'
-import { terminate } from './spawn.ts'
+import { terminate, trackChild, untrackChild } from './spawn.ts'
 
 const ALL_TOOLS = [
   'Task', 'Artifact', 'Bash', 'CronCreate', 'CronDelete', 'CronList', 'DesignSync',
@@ -120,6 +120,7 @@ async function* runClaude(req: TurnRequest, signal: AbortSignal): AsyncIterable<
     windowsHide: true,
   })
 
+  trackChild(child)
   const onAbort = () => terminate(child)
   signal.addEventListener('abort', onAbort, { once: true })
 
@@ -139,6 +140,35 @@ async function* runClaude(req: TurnRequest, signal: AbortSignal): AsyncIterable<
   let costUsd: number | undefined
   let buf = ''
 
+  /** One NDJSON event. Named so `close` can replay a line with no trailing newline. */
+  const handleLine = (ev: any) => {
+    if (ev.type === 'system' && ev.subtype === 'thinking_tokens') {
+      push({ type: 'activity', text: 'Thinking' })
+    } else if (ev.type === 'assistant' && ev.message?.content) {
+      for (const block of ev.message.content) {
+        if (block.type === 'text' && block.text) {
+          // Append. Assigning kept only the last block, so a reply split across
+          // several — which is what happens whenever a tool call sits in the
+          // middle of the response — silently lost everything before it.
+          text += block.text
+          push({ type: 'delta', text: block.text })
+        } else if (block.type === 'tool_use') {
+          if (block.name === 'StructuredOutput') structured = block.input
+          push({
+            type: 'tool',
+            name: block.name,
+            detail: HUMAN_TOOL_LABEL[block.name] ?? `Using ${block.name}`,
+          })
+        }
+      }
+    } else if (ev.type === 'system' && ev.subtype === 'permission_denied') {
+      push({ type: 'activity', text: `Blocked: ${ev.tool_name}` })
+    } else if (typeof ev.total_cost_usd === 'number') {
+      costUsd = ev.total_cost_usd
+      if (ev.is_error) push({ type: 'error', message: ev.result || 'claude reported an error' })
+    }
+  }
+
   child.stdout.setEncoding('utf8')
   child.stdout.on('data', chunk => {
     buf += chunk
@@ -149,31 +179,7 @@ async function* runClaude(req: TurnRequest, signal: AbortSignal): AsyncIterable<
       if (!line) continue
       let ev: any
       try { ev = JSON.parse(line) } catch { continue }
-
-      if (ev.type === 'system' && ev.subtype === 'thinking_tokens') {
-        push({ type: 'activity', text: 'Thinking' })
-      } else if (ev.type === 'assistant' && ev.message?.content) {
-        for (const block of ev.message.content) {
-          if (block.type === 'text' && block.text) {
-            text = block.text
-            push({ type: 'delta', text: block.text })
-          } else if (block.type === 'tool_use') {
-            if (block.name === 'StructuredOutput') {
-              structured = block.input
-            }
-            push({
-              type: 'tool',
-              name: block.name,
-              detail: HUMAN_TOOL_LABEL[block.name] ?? `Using ${block.name}`,
-            })
-          }
-        }
-      } else if (ev.type === 'system' && ev.subtype === 'permission_denied') {
-        push({ type: 'activity', text: `Blocked: ${ev.tool_name}` })
-      } else if (typeof ev.total_cost_usd === 'number') {
-        costUsd = ev.total_cost_usd
-        if (ev.is_error) push({ type: 'error', message: ev.result ?? 'claude reported an error' })
-      }
+      handleLine(ev)
     }
   })
 
@@ -181,12 +187,17 @@ async function* runClaude(req: TurnRequest, signal: AbortSignal): AsyncIterable<
   child.stderr.on('data', d => { stderr += d })
 
   child.on('error', err => {
+    untrackChild(child)
     push({ type: 'error', message: `spawn failed: ${err.message}` })
     done = true
     resolveNext?.()
   })
 
   child.on('close', code => {
+    untrackChild(child)
+    const tail = buf.trim()
+    buf = ''
+    if (tail) { try { handleLine(JSON.parse(tail)) } catch { /* not our line */ } }
     if (code !== 0 && code !== null && !structured && !text) {
       push({ type: 'error', message: stderr.trim().slice(0, 500) || `claude exited ${code}` })
     } else {

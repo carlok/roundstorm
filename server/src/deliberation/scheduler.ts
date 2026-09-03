@@ -12,6 +12,7 @@
  * Sealed opening: round 1 is written blind and revealed together.
  */
 import type { Agent, Deliberation, Message, Room, Tier } from '../types.ts'
+import { createHash } from 'node:crypto'
 import * as db from '../db.ts'
 import { bus } from '../bus.ts'
 import { getAdapter, schemaFor } from '../adapters/registry.ts'
@@ -30,7 +31,7 @@ interface Running {
 const running = new Map<string, Running>()
 
 /** Per-turn deadline. Generous, because a tool-using turn can legitimately be slow. */
-const TURN_TIMEOUT_MS = Number(process.env.ROUNDSTORM_TURN_TIMEOUT_MS ?? 6 * 60_000)
+export const TURN_TIMEOUT_MS = Number(process.env.ROUNDSTORM_TURN_TIMEOUT_MS ?? 6 * 60_000)
 
 export const isRunning = (deliberationId: string) => running.has(deliberationId)
 
@@ -57,6 +58,19 @@ export function interruptDeliberation(id: string) {
   // already in flight were billed for nothing.
   r.interrupt = true
   r.controller.abort()
+}
+
+/**
+ * Abort every deliberation this process is driving. Called on shutdown, so the
+ * rows are not left `running` for `reconcileDeliberations` to clean up next boot.
+ */
+export function abortAllDeliberations(): number {
+  const n = running.size
+  for (const [id, r] of running) {
+    db.updateDeliberation(id, { status: 'stopped', endedAt: Date.now() })
+    r.controller.abort()
+  }
+  return n
 }
 
 export function extendDeliberation(id: string, by: number) {
@@ -121,7 +135,10 @@ async function runRounds(deliberationId: string, signal: AbortSignal) {
   for (let round = 1; ; round++) {
     const d = db.getDeliberation(deliberationId)
     if (!d || d.status !== 'running') return
-    if (round > d.rounds) return
+    // Not reachable through the API, which now rejects a non-numeric round count.
+    // Belt and braces for a hand-edited row: `Infinity` binds as NULL, and every
+    // comparison against a non-finite value is false rather than true.
+    if (!Number.isFinite(d.rounds) || round > d.rounds) return
     if (signal.aborted) return
 
     const room = db.getRoom(d.roomId)
@@ -242,13 +259,25 @@ export async function runTurn(args: {
     mentioned: steers.some(s => mentions(s.body, agent.name)),
   })
 
+  // A digest, not the prompts themselves.
+  //
+  // Storing both in full was ~10KB per agent-turn and grew to 90% of the whole
+  // database — several times the size of the transcript anyone actually reads,
+  // for text that is reconstructible from the room's own state. The digest keeps
+  // what the log is for: which sections went in, how big each prompt was, and the
+  // steer verbatim, because a steer is the one part that is not recoverable from
+  // anywhere else.
   db.logEvent('turn.started', {
     roomId: room.id, deliberationId: deliberation.id, agentId: agent.id,
     payload: {
       round, brain: agent.brain, model: agent.model, tier,
       sections: ctx.sections,
-      systemPrompt: ctx.systemPrompt,
-      userPrompt: ctx.userPrompt,
+      systemPromptBytes: Buffer.byteLength(ctx.systemPrompt),
+      userPromptBytes: Buffer.byteLength(ctx.userPrompt),
+      promptDigest: createHash('sha256')
+        .update(ctx.systemPrompt).update('\u0000').update(ctx.userPrompt)
+        .digest('hex').slice(0, 16),
+      steers: steers.map(s => s.body.slice(0, 2_000)),
     },
   })
 
@@ -351,6 +380,22 @@ export async function runTurn(args: {
   const raw = structured ?? extractJson(text)
   const parsed = coerceTurn(raw, stripJsonBlock(text))
 
+  // An error that arrived alongside some text used to be discarded outright: the
+  // three guards above all require `!text`, so a hard vendor failure plus one
+  // stray text block was stored as an ordinary turn. Claude reports exactly that
+  // shape (`is_error` with content already streamed), and so does cursor. Keep
+  // the partial work — it may be most of the answer — but never let it read as a
+  // clean turn.
+  if (errorMsg) {
+    parsed.degraded = true
+    db.logEvent('turn.degraded', {
+      roomId: room.id, deliberationId: deliberation.id, agentId: agent.id,
+      payload: { round, error: errorMsg, kept: text.length },
+    })
+    parsed.turn.body = `${parsed.turn.body}\n\n_(${agent.name}'s brain reported an error `
+      + `partway through: ${errorMsg.slice(0, 200)}. What is above may be incomplete.)_`
+  }
+
   const message = db.insertMessage({
     roomId: room.id,
     authorType: 'agent',
@@ -366,12 +411,13 @@ export async function runTurn(args: {
     brain: agent.brain,
     model: agent.model,
     costUsd,
-    raw: JSON.stringify({ structured, text }).slice(0, 200_000),
+    raw: JSON.stringify({ structured, text }).slice(0, 8_000),
   })
 
   await applyPositionOps({
     roomId: room.id, agent, ops: parsed.positionOps,
     messageId: message.id, round, blind: sealed,
+    deliberationId: deliberation.id,
   })
 
   // Memory is proposed, never written silently — the human keeps or discards
@@ -384,7 +430,7 @@ export async function runTurn(args: {
   const closing = round >= deliberation.rounds || deliberation.mode === 'conclave'
   for (const m of (closing ? parsed.memory.slice(0, 2) : [])) {
     db.proposeMemory({
-      agentId: agent.id, projectId: null, roomId: room.id,
+      agentId: agent.id, projectId: room.projectId, roomId: room.id,
       scope: 'project', type: m.type, text: m.text, sourceMessageId: message.id,
     })
   }

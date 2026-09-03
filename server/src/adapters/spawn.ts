@@ -11,6 +11,12 @@ import { checkCommandLine, needsShell } from './platform.ts'
  * at all (Node emulates it as an immediate TerminateProcess) and killing a
  * parent there leaves its children running, so the tree has to be taken down
  * explicitly or a cancelled turn keeps burning tokens invisibly.
+ *
+ * Known limit on Unix: this signals the direct child only. A CLI that leaves an
+ * orphaned grandchild behind would survive, and taking the whole group down needs
+ * `detached: true` plus `kill(-pid)` — a change to process-group semantics that
+ * wants a real brain run to verify, not a unit test. Untested either way, so it
+ * is recorded here rather than assumed solved.
  */
 export function terminate(child: { pid?: number; killed: boolean; kill: (s?: NodeJS.Signals) => boolean }): void {
   if (child.killed || !child.pid) return
@@ -22,6 +28,34 @@ export function terminate(child: { pid?: number; killed: boolean; kill: (s?: Nod
   }
   try { child.kill('SIGTERM') } catch { /* already gone */ }
 }
+
+/**
+ * Every brain process this daemon has running.
+ *
+ * `terminate` was only ever wired to a turn's AbortSignal, so quitting the app —
+ * or having it orphaned and exit — left `claude`, `codex` and `cursor-agent`
+ * running against the user's account with nothing left to read their output.
+ * A registry is the only way a shutdown can reach them.
+ */
+const live = new Set<Parameters<typeof terminate>[0]>()
+
+export function trackChild<T extends Parameters<typeof terminate>[0]>(child: T): T {
+  live.add(child)
+  return child
+}
+
+export const untrackChild = (child: Parameters<typeof terminate>[0]) => live.delete(child)
+
+/** Kill every tracked brain process. Called on shutdown; safe to call twice. */
+export function terminateAll(): number {
+  const n = live.size
+  for (const child of live) terminate(child)
+  live.clear()
+  return n
+}
+
+/** For tests and status output. */
+export const liveChildCount = () => live.size
 
 export interface StreamOpts {
   cwd?: string
@@ -75,6 +109,7 @@ export async function* streamProcess(
     windowsHide: true,
   })
 
+  trackChild(child)
   const onAbort = () => terminate(child)
   signal.addEventListener('abort', onAbort, { once: true })
 
@@ -108,12 +143,22 @@ export async function* streamProcess(
   child.stderr.on('data', d => { stderr += d })
 
   child.on('error', err => {
+    untrackChild(child)
     push({ type: 'error', message: `${cmd} failed to start: ${err.message}` })
     done = true
     wake?.()
   })
 
   child.on('close', code => {
+    untrackChild(child)
+    // The last line has no trailing newline when a CLI ends without one, and the
+    // loop above only drains on '\n' — so the final result object was dropped and
+    // the turn looked empty. Flush it before onClose reads the outcome.
+    const tail = buf.trim()
+    buf = ''
+    if (tail && tail[0] === '{') {
+      try { opts.onLine(JSON.parse(tail), push) } catch { /* not our line */ }
+    }
     try { opts.onClose(code, stderr, push) } catch (e) {
       push({ type: 'error', message: String(e) })
     }

@@ -25,7 +25,7 @@ const roster = [A, B, C, D]
 const room = db.createRoom(project.id, 'R', 'room', roster.map(a => a.id))
 
 const op = (agent: typeof A, ops: any[]) =>
-  applyPositionOps({ roomId: room.id, agent, ops, messageId: 'm', round: 1 })
+  applyPositionOps({ roomId: room.id, agent, ops, messageId: 'm', round: 1 , deliberationId: null})
 
 test('everyone backing the same position is strong consensus', async () => {
   await op(A, [{ label: null, title: 'Oil whip', op: 'assert', note: '', text: 'It is oil whip.' }])
@@ -128,7 +128,7 @@ test('a restatement under a new title is merged into the position that already s
     applyPositionOps({
       roomId: r2.id, agent,
       ops: [{ label: null, title, op: 'assert', note: '', text }],
-      messageId: 'm', round: 1,
+      messageId: 'm', round: 1, deliberationId: null,
     })
 
   await put(A, 'Hysteresis band alone cannot distinguish mechanism',
@@ -154,7 +154,7 @@ test('a genuinely different position is not merged away', async () => {
     applyPositionOps({
       roomId: r3.id, agent,
       ops: [{ label: null, title, op: 'assert', note: '', text }],
-      messageId: 'm', round: 1,
+      messageId: 'm', round: 1, deliberationId: null,
     })
   await put(A, 'Oil whip diagnosis via subsynchronous frequency lock',
     'The vibration locks to the first natural frequency.')
@@ -174,7 +174,7 @@ test('a blind restatement is recorded as co-assertion, not as endorsing the unse
   const put = (agent: typeof A, title: string, text: string, blind: boolean) =>
     applyPositionOps({
       roomId: r.id, agent, ops: [{ label: null, title, op: 'assert', note: '', text }],
-      messageId: 'm', round: 1, blind,
+      messageId: 'm', round: 1, deliberationId: null, blind,
     })
 
   await put(A, 'Hysteresis band alone cannot distinguish mechanism',
@@ -195,12 +195,12 @@ test('a sighted restatement IS an endorsement', async () => {
 
   const r = db.createRoom(project.id, 'Sighted', 'room', [A.id, B.id])
   await applyPositionOps({
-    roomId: r.id, agent: A, messageId: 'm', round: 1, blind: true,
+    roomId: r.id, agent: A, messageId: 'm', round: 1, deliberationId: null, blind: true,
     ops: [{ label: null, title: 'Hysteresis band alone cannot distinguish mechanism',
             op: 'assert', note: '', text: 'Not diagnostic on its own.' }],
   })
   await applyPositionOps({
-    roomId: r.id, agent: B, messageId: 'm', round: 2, blind: false,
+    roomId: r.id, agent: B, messageId: 'm', round: 2, deliberationId: null, blind: false,
     ops: [{ label: null, title: 'Hysteresis band insufficient to distinguish mechanism',
             op: 'assert', note: '', text: 'The band alone is insufficient.' }],
   })
@@ -291,4 +291,127 @@ test('deleting a room takes its memory with it', () => {
   db.setMemoryStatus(c.id, 'accepted')
   db.deleteRoom(r.id)
   assert.equal(db.listMemory({ agentId: A.id }).filter(x => x.roomId === r.id).length, 0)
+})
+
+// --- one room, more than one deliberation ---
+
+test('a second deliberation does not inherit the first one\'s consensus', async () => {
+  // The room's positions are its standing beliefs and outlive any single run —
+  // that is the product. What was wrong is counting stances nobody cast in this
+  // run: the headline consensus level, which is the thing the result card leads
+  // with, was computed over a previous question's answers.
+  const r = db.createRoom(project.id, 'Two runs', 'room', roster.map(a => a.id))
+  const run1 = db.createDeliberation({
+    roomId: r.id, mode: 'deliberation', rounds: 2, style: 'parallel',
+    sealedOpening: false, status: 'complete', currentRound: 2,
+    question: 'first question', tier: 'reasoning',
+  } as never)
+  const put = (agent: typeof A, ops: any[], deliberationId: string | null) =>
+    applyPositionOps({ roomId: r.id, agent, ops, messageId: 'm', round: 1, deliberationId })
+
+  await put(A, [{ label: null, title: 'Bearing clearance', op: 'assert', note: '', text: 'x' }], run1.id)
+  for (const a of [B, C, D]) {
+    await put(a, [{ label: 'P1', title: null, op: 'endorse', note: 'agreed', text: '' }], run1.id)
+  }
+  assert.equal(summarise(r.id, roster, run1.id).level, 'strong_consensus')
+
+  const run2 = db.createDeliberation({
+    roomId: r.id, mode: 'deliberation', rounds: 2, style: 'parallel',
+    sealedOpening: false, status: 'running', currentRound: 0,
+    question: 'an entirely different question', tier: 'reasoning',
+  } as never)
+
+  assert.equal(summarise(r.id, roster, run2.id).level, 'no_reliable_conclusion',
+    'the new run reported a consensus reached about a different question')
+  assert.equal(summarise(r.id, roster).level, 'strong_consensus',
+    'the room-wide view lost what the room actually settled')
+})
+
+test('a later run taking a stance on a standing position counts only that run', async () => {
+  const r = db.createRoom(project.id, 'Carry over', 'room', roster.map(a => a.id))
+  const mkRun = (q: string) => db.createDeliberation({
+    roomId: r.id, mode: 'deliberation', rounds: 2, style: 'parallel',
+    sealedOpening: false, status: 'running', currentRound: 0, question: q, tier: 'reasoning',
+  } as never)
+  const run1 = mkRun('first'), run2 = mkRun('second')
+  const put = (agent: typeof A, ops: any[], deliberationId: string) =>
+    applyPositionOps({ roomId: r.id, agent, ops, messageId: 'm', round: 1, deliberationId })
+
+  await put(A, [{ label: null, title: 'A standing belief', op: 'assert', note: '', text: 'y' }], run1.id)
+  for (const a of [B, C, D]) {
+    await put(a, [{ label: 'P1', title: null, op: 'endorse', note: '', text: '' }], run1.id)
+  }
+  // In run 2 only one agent goes on the record about it.
+  await put(A, [{ label: 'P1', title: null, op: 'endorse', note: 'still think so', text: '' }], run2.id)
+
+  const scoped = summarise(r.id, roster, run2.id)
+  assert.equal(scoped.positions.length, 1, 'the position was not pulled into the run')
+  assert.equal(scoped.positions[0].stances.length, 1,
+    'the earlier run\'s endorsements were counted again')
+  assert.notEqual(scoped.level, 'strong_consensus',
+    'one agent on the record was reported as the whole room agreeing')
+})
+
+test('a concurrent turn sees the position the other one just opened', async () => {
+  // Not a label race: `createPosition` counts and inserts with no await between,
+  // and Node is single-threaded, so labels cannot collide. The real one is the
+  // read *before* the await. `applyPositionOps` runs synchronously up to
+  // `await nearest(...)`, so in a parallel round the second agent resolves its
+  // label — and reads the position list the merge check uses — while the first
+  // agent's insert is still pending. Its endorsement was then dropped as naming
+  // a position that does not exist, and its restatement opened a duplicate
+  // instead of merging. Both fragment the ledger, which is what makes a room in
+  // agreement report as having reached no reliable conclusion.
+  const r = db.createRoom(project.id, 'Concurrent', 'room', roster.map(a => a.id))
+
+  await Promise.all([
+    applyPositionOps({
+      roomId: r.id, agent: A,
+      ops: [{ label: null, title: 'Bearing clearance', op: 'assert', note: '', text: 'x' }],
+      messageId: 'm', round: 1, deliberationId: null,
+    }),
+    applyPositionOps({
+      roomId: r.id, agent: B,
+      ops: [{ label: 'P1', title: null, op: 'endorse', note: 'agreed', text: '' }],
+      messageId: 'm', round: 1, deliberationId: null,
+    }),
+  ])
+
+  const positions = db.listPositions(r.id)
+  assert.equal(positions.length, 1)
+  assert.equal(positions[0].stances.length, 2,
+    "the second agent's endorsement was dropped as naming a position that did not exist yet")
+})
+
+test('the prompt separates this run\'s positions from the room\'s standing ones', async () => {
+  // The rendered ledger stays room-wide on purpose — see renderLedger. But an old
+  // position must not read as though this run's participants backed it.
+  const r = db.createRoom(project.id, 'Sectioned', 'room', roster.map(a => a.id))
+  const mkRun = (q: string) => db.createDeliberation({
+    roomId: r.id, mode: 'deliberation', rounds: 2, style: 'parallel',
+    sealedOpening: false, status: 'running', currentRound: 0, question: q, tier: 'reasoning',
+  } as never)
+  const run1 = mkRun('first'), run2 = mkRun('second')
+
+  await applyPositionOps({
+    roomId: r.id, agent: A,
+    ops: [{ label: null, title: 'Settled last time', op: 'assert', note: '', text: 'old' }],
+    messageId: 'm', round: 1, deliberationId: run1.id,
+  })
+  await applyPositionOps({
+    roomId: r.id, agent: B,
+    ops: [{ label: null, title: 'Raised this time', op: 'assert', note: '', text: 'new' }],
+    messageId: 'm', round: 1, deliberationId: run2.id,
+  })
+
+  const text = renderLedger(r.id, roster, run2.id)
+  assert.match(text, /Raised this time/, "this run's position is missing from the prompt")
+  assert.match(text, /Standing positions from earlier deliberations/)
+  assert.match(text, /Settled last time/, 'the room lost its standing position entirely')
+
+  // The old position is listed, but without stances — those were cast about a
+  // different question and read as support for this one.
+  const standing = text.slice(text.indexOf('Standing positions'))
+  assert.doesNotMatch(standing, /Alice: assert/,
+    "an earlier run's stances were shown as though they applied here")
 })

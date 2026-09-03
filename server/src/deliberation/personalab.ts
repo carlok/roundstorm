@@ -96,7 +96,12 @@ export function reportArm(roomId: string): ArmReport | null {
   if (!room) return null
   const roster = room.memberIds.map(id => db.getAgent(id)).filter((a): a is Agent => !!a)
   const messages = db.listMessages(roomId).filter(m => m.authorType === 'agent')
-  const ledger = summarise(roomId, roster)
+  // The room's latest run, matching where `conclusion` below comes from. Before
+  // this the level and positions were room-wide while the conclusion was not, so
+  // re-running an arm silently fused two experiments into one verdict.
+  const runs = db.listDeliberations(roomId)
+  const latestRun = runs.length ? runs[runs.length - 1].id : undefined
+  const ledger = summarise(roomId, roster, latestRun)
   const results = db.listResults(roomId)
 
   const stanceMix: Record<string, number> = {}
@@ -115,7 +120,7 @@ export function reportArm(roomId: string): ArmReport | null {
   wordCounts.sort((a, b) => a - b)
 
   return {
-    mindChanges: countMindChanges(roomId, messages),
+    mindChanges: countMindChanges(roomId, messages, latestRun),
     contested: ledger.positions.filter(p => p.stances.some(s => s.op === 'oppose')).length,
     roomId, roomName: room.name,
     cast: roster.map(a => ({
@@ -213,8 +218,15 @@ function observe(arms: ArmReport[]): string[] {
  * either signal alone under-reports — observed on a run where three agents
  * conceded in prose and the ledger showed zero movement.
  */
-function countMindChanges(roomId: string, messages: { authorId: string | null; stance: string | null }[]): number {
-  const positions = db.listPositions(roomId)
+function countMindChanges(
+  roomId: string,
+  messages: { authorId: string | null; stance: string | null }[],
+  deliberationId?: string,
+): number {
+  // Scoped: stances carry a round number and nothing else, so across two runs
+  // run 1's round 3 and run 2's round 1 interleave by integer and "first" and
+  // "last" get computed across two different questions.
+  const positions = db.listPositions(roomId, { deliberationId })
   const first = new Map<string, string>()
   const last = new Map<string, string>()
   const abandoned = new Set<string>()

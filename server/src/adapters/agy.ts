@@ -85,7 +85,8 @@ function runAgy(req: TurnRequest, signal: AbortSignal): AsyncIterable<AdapterEve
     },
     onClose: (code, stderr, push) => {
       if (!response) {
-        push({ type: 'error', message: failed ?? stderr.trim().slice(0, 400) ?? `agy exited ${code}` })
+        // `||`, not `??` — see codex.ts. An empty stderr produced a blank reason.
+        push({ type: 'error', message: failed || stderr.trim().slice(0, 400) || `agy exited ${code}` })
         return
       }
       let structured: unknown = null

@@ -9,6 +9,8 @@ import { makeApi } from './api.ts'
 import { bus } from './bus.ts'
 import { seedIfEmpty } from './seed.ts'
 import { probeBrains } from './adapters/registry.ts'
+import { terminateAll } from './adapters/spawn.ts'
+import { abortAllDeliberations } from './deliberation/scheduler.ts'
 import { DATA_PATH, db, logEvent, reconcileDeliberations } from './db.ts'
 
 // ROUNDSTORM_PORT is the documented name; PORT stays accepted because the
@@ -117,10 +119,56 @@ function watchParent() {
     const reparented = process.platform !== 'win32' && process.ppid === 1
     if (!alive || reparented) {
       logEvent('daemon.orphaned', { payload: { parent } })
-      process.exit(0)
+      // Not process.exit: that skips the brain processes we started, which then
+      // keep running against the user's account with nobody reading their output.
+      void shutdown('orphaned')
     }
   }, 3000).unref()
 }
+
+/**
+ * Leave nothing behind.
+ *
+ * The brains are separate processes — `claude`, `codex`, `cursor-agent` — and
+ * killing this daemon does not touch them. Before this, quitting the app left a
+ * turn's worth of CLI running against the user's account, invisibly, with no
+ * reader for its output. `terminateAll` is the only thing that reaches them.
+ */
+let shuttingDown = false
+async function shutdown(reason: string, code = 0) {
+  if (shuttingDown) return
+  shuttingDown = true
+  const aborted = abortAllDeliberations()
+  const killed = terminateAll()
+  if (aborted || killed) {
+    console.log(`shutdown (${reason}): stopped ${aborted} deliberation(s), ended ${killed} brain process(es)`)
+  }
+  try { logEvent('daemon.shutdown', { payload: { reason, aborted, killed } }) } catch { /* db may be gone */ }
+  server.close()
+  // The http server can hold a keep-alive socket open past everything useful.
+  setTimeout(() => process.exit(code), 500).unref()
+}
+
+for (const sig of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(sig, () => { void shutdown(sig) })
+}
+
+/**
+ * A rejected promise must not take the daemon with it.
+ *
+ * Express 4 does not forward rejections from async route handlers, and there are
+ * several — so before this, one bad search query killed a daemon that was in the
+ * middle of a paid deliberation. Log it and keep going; a genuinely broken
+ * process will fail its next request loudly enough.
+ */
+process.on('unhandledRejection', reason => {
+  console.error('unhandled rejection:', reason)
+  try { logEvent('daemon.unhandled', { payload: { kind: 'rejection', message: String(reason) } }) } catch { }
+})
+process.on('uncaughtException', err => {
+  console.error('uncaught exception:', err)
+  try { logEvent('daemon.unhandled', { payload: { kind: 'exception', message: String(err?.message ?? err) } }) } catch { }
+})
 
 const reconciled = reconcileDeliberations()
 

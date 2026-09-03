@@ -87,7 +87,7 @@ export async function runConclave(
     })))
     if (signal.aborted) break
 
-    const check = tally(d.roomId, roster)
+    const check = tally(d.roomId, roster, d.id)
     outcome = { ...check, rounds: round }
     db.logEvent('conclave.round', {
       roomId: d.roomId, deliberationId: d.id,
@@ -118,8 +118,12 @@ export async function runConclave(
  * version. Version matters: a revision wipes prior endorsements, so a yes
  * collected against v3 does not count toward v4.
  */
-function tally(roomId: string, roster: Agent[]): Omit<ConclaveOutcome, 'rounds'> {
-  const positions = db.listPositions(roomId)
+function tally(roomId: string, roster: Agent[], deliberationId: string): Omit<ConclaveOutcome, 'rounds'> {
+  // Scoped to this run. Unscoped, a second conclave in a room whose first one
+  // reached unanimity found that old position still endorsed by everyone and
+  // returned `reached` at round 1 — the run did not just get a wrong label, it
+  // stopped before anyone spoke.
+  const positions = db.listPositions(roomId, { deliberationId })
   for (const p of positions) {
     const supporting = p.stances.filter(
       s => (s.op === 'endorse' || s.op === 'assert') && s.version === p.version)

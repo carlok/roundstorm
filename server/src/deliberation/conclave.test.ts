@@ -37,8 +37,9 @@ function scenario(behaviour: (agentName: string, round: number) => any[]) {
   // Stand in for the model: apply whatever ops the scenario dictates.
   const runTurn = async (args: any) => {
     const ops = behaviour(args.agent.name.replace(tag, ''), args.round)
-    applyPositionOps({
+    await applyPositionOps({
       roomId: room.id, agent: args.agent, ops, messageId: 'm', round: args.round,
+      deliberationId: d.id,
     })
   }
   return { room, d, roster, runTurn }
@@ -132,4 +133,47 @@ test("the devil's seat rotates so no agent is permanently chair or attacker", as
   assert.notEqual(seen[0].devil, seen[1].devil)
   // The chair never attacks its own draft in the same round.
   for (const r of seen) assert.notEqual(r.chair, r.devil)
+})
+
+test('a second conclave in the same room does not inherit the first one\'s unanimity', async () => {
+  // The severe one. `tally` read the whole room, so a room whose first conclave
+  // reached unanimity had that position still endorsed by everyone at its current
+  // version. The second conclave found it before anybody spoke and returned
+  // `reached` at round 1 — a verdict on the previous question, delivered as the
+  // answer to this one.
+  const s = scenario((_n, round) => (round === 1 ? [assertP1, endorse] : [endorse]))
+  const first = await runConclave(s.d.id, new AbortController().signal, s.runTurn)
+  assert.equal(first.reached, true, 'precondition: the first conclave has to succeed')
+
+  // A fresh run in the same room, on a different question, where nobody speaks.
+  const second = db.createDeliberation({
+    roomId: s.room.id, mode: 'conclave', rounds: 2, style: 'parallel',
+    sealedOpening: false, status: 'running', currentRound: 0,
+    question: 'an entirely different question', tier: 'reasoning',
+  })
+  const silent = async () => { /* nobody takes a position this run */ }
+  const outcome = await runConclave(second.id, new AbortController().signal, silent)
+
+  assert.equal(outcome.reached, false,
+    'the new conclave reported unanimity nobody in it ever expressed')
+  assert.ok(outcome.rounds >= 1, 'it did not even run a round')
+})
+
+test('the room keeps its standing positions even though the run does not count them', async () => {
+  // Scoping the ops must not look like deleting them: the Inspector's Positions
+  // tab is a room panel, and the room's history is the product's persistence.
+  const s = scenario(() => [assertP1])
+  await applyPositionOps({
+    roomId: s.room.id, agent: s.roster[0], ops: [assertP1] as never,
+    messageId: 'm', round: 1, deliberationId: s.d.id,
+  })
+  const other = db.createDeliberation({
+    roomId: s.room.id, mode: 'conclave', rounds: 2, style: 'parallel',
+    sealedOpening: false, status: 'running', currentRound: 0,
+    question: 'later', tier: 'reasoning',
+  })
+
+  assert.equal(db.listPositions(s.room.id).length, 1, 'the room-wide view lost the position')
+  assert.equal(db.listPositions(s.room.id, { deliberationId: other.id }).length, 0,
+    'a run with no stances still saw the earlier one')
 })

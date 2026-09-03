@@ -35,6 +35,7 @@ const DATA_DIR = resolve(process.env.ROUNDSTORM_DATA ?? defaultDataDir())
 mkdirSync(DATA_DIR, { recursive: true })
 
 import { openDatabase } from './sqlite/index.ts'
+import { migrate } from './sqlite/migrate.ts'
 
 export const db = openDatabase(join(DATA_DIR, 'roundstorm.db'))
 db.pragma('journal_mode = WAL')
@@ -189,6 +190,10 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS idx_events_room ON events(room_id, id);
 `)
+
+// Runs before anything prepares a statement against a column the baseline block
+// above does not create. See sqlite/migrate.ts: that block is frozen at v0.
+export const schemaVersion = migrate(db)
 
 export const uid = () => randomUUID()
 export const now = () => Date.now()
@@ -557,11 +562,28 @@ const toPosition = (r: any, stances: PositionStanceRow[]): Position => ({
   stances,
 })
 
-export function listPositions(roomId: string): Position[] {
+/**
+ * A room's positions, with each agent's current stance on them.
+ *
+ * `deliberationId` scopes the *stances*, not the positions: a position belongs to
+ * the room and outlives any single run, but counting stances nobody cast in this
+ * run made every consensus level wrong from the second deliberation onwards. A
+ * position with no stance in scope is dropped, since there is nothing to count.
+ *
+ * Without the option this returns the whole room, which is what the Inspector's
+ * Positions tab and the export both want.
+ */
+export function listPositions(roomId: string, opts: { deliberationId?: string } = {}): Position[] {
   const rows = db.prepare('SELECT * FROM positions WHERE room_id=? ORDER BY created_at').all(roomId) as any[]
-  const ops = db.prepare(`SELECT * FROM position_ops WHERE position_id IN
-    (SELECT id FROM positions WHERE room_id=?) ORDER BY id`).all(roomId) as any[]
-  return rows.map(r => {
+  const scoped = opts.deliberationId !== undefined
+  const ops = (scoped
+    ? db.prepare(`SELECT * FROM position_ops WHERE position_id IN
+        (SELECT id FROM positions WHERE room_id=?) AND deliberation_id=? ORDER BY id`)
+        .all(roomId, opts.deliberationId)
+    : db.prepare(`SELECT * FROM position_ops WHERE position_id IN
+        (SELECT id FROM positions WHERE room_id=?) ORDER BY id`)
+        .all(roomId)) as any[]
+  const out = rows.map(r => {
     // Latest op per agent wins: a ledger is a current state, not a pile of history.
     const latest = new Map<string, any>()
     for (const o of ops) if (o.position_id === r.id && o.agent_id) latest.set(o.agent_id, o)
@@ -569,6 +591,7 @@ export function listPositions(roomId: string): Position[] {
       agentId: o.agent_id, op: o.op, note: o.note, version: o.version, round: o.round,
     })))
   })
+  return scoped ? out.filter(p => p.stances.length) : out
 }
 
 export function getPositionByLabel(roomId: string, label: string) {
@@ -606,11 +629,14 @@ export function revisePosition(positionId: string, text: string, title?: string)
 export function recordOp(o: {
   positionId: string; version: number; agentId: string | null; op: string
   note?: string; messageId?: string | null; round?: number | null
+  /** Which run this stance was taken in. NULL only for rows predating the column. */
+  deliberationId?: string | null
 }) {
-  db.prepare(`INSERT INTO position_ops (position_id,version,agent_id,op,note,message_id,round,created_at)
-    VALUES (?,?,?,?,?,?,?,?)`)
+  db.prepare(`INSERT INTO position_ops
+      (position_id,version,agent_id,op,note,message_id,round,deliberation_id,created_at)
+    VALUES (?,?,?,?,?,?,?,?,?)`)
     .run(o.positionId, o.version, o.agentId, o.op, o.note ?? '',
-         o.messageId ?? null, o.round ?? null, now())
+         o.messageId ?? null, o.round ?? null, o.deliberationId ?? null, now())
 }
 
 // ---------- results ----------

@@ -139,13 +139,13 @@ launch requires right-click → Open. The bundle has no native dependencies —
 storage is Node's built-in `node:sqlite`.
 
 ```bash
-npm test          # 128 tests
+npm test          # 158 tests
 npm run coverage  # the same, with a coverage report
 npm run typecheck
 npm run test:ui   # the browser sweep; needs a build and a Chrome
 ```
 
-Coverage sits around **79% of lines, 84% of branches** overall, and that average
+Coverage sits around **77% of lines, 85% of branches** overall, and that average
 is not the interesting number. The split is deliberate:
 
 | Area | Lines | Why |
@@ -155,6 +155,8 @@ is not the interesting number. The split is deliberate:
 | `deliberation/conclave.ts` | 89% | Unanimity, endorsement expiry, the cap. |
 | `deliberation/context.ts` | 93% | Round isolation is asserted against the composed prompt. |
 | `db.ts` | 94% | Includes closing out deliberations a crash left `running`, which otherwise brick a room permanently. |
+| `deliberation/ledger.ts` | 97% | Consensus is scoped to one deliberation. Unscoped, a second run in a room inherited the first one's verdict. |
+| `sqlite/migrate.ts` | tested against an old-schema fixture | A column added to an existing database used to mean a daemon that never starts. |
 | `adapters/platform.ts` | 94% | Every Windows rule lives here — PATHEXT, `.cmd` shims, the command-line ceiling — and none of it can be exercised on macOS except by test. |
 | `headless/config.ts` | 80% | Rejecting a bad experiment file before anything is created or billed. |
 | `adapters/resolve.ts`, `spawn.ts` | 75–87% | Binary resolution and process launch. Twice now a silent regression here removed an agent from a room without saying so. |

@@ -1086,3 +1086,81 @@ be clicked. It builds the bundle, starts the daemon, drives headless Chrome and
 asks of every control what a click at its centre would actually hit. It covers a
 control on purpose first and fails if it does not notice — an earlier version of
 this file would have passed against a page that rendered nothing.
+
+## Improvement round — money, survival, and a correct record
+
+Scope chosen: the defects that spend money without asking, kill the daemon, or
+produce a research result that looks finished and is not.
+
+**The record was wrong across runs.** `positions` had a room id and no run id, so
+`summarise`, `tally` and `countMindChanges` computed over everything the room had
+ever held. A second deliberation inherited the first one's verdict.
+
+Worst of the three was `tally`: a room whose first conclave reached unanimity had
+that position still endorsed by everyone at its current version, so the second
+conclave found it before anybody spoke and returned `reached` at round 1. Not a
+wrong label — the run stopped.
+
+The fix scopes the *ops*, not the positions. Positions stay owned by the room,
+which is the product: persistent researchers holding standing beliefs. Only the
+stances are counted per run. Re-parenting positions would have been worse —
+labels are allocated room-wide (`P{n+1}`) and cited in prose, so per-run numbering
+puts two `P1`s in one room, and it would break the cross-run de-duplication that
+lets a later run merge into a belief the room already holds.
+
+`renderLedger` deliberately stays room-wide, sectioned into *this deliberation*
+and *standing positions*. Scoping it would make `applyPositionOps` lie: the agent
+would see nothing, open a new title, and the merge — which searches the whole
+room — would record `endorse` against something it could not see. That is exactly
+the fabricated provenance the sealed-round rule forbids.
+
+**A migration mechanism** had to come first. `db.ts` created its schema with one
+`CREATE TABLE IF NOT EXISTS` block, which handles a new table and never a new
+column: the first query naming one throws at import, before `listen()`. The rule
+now written down is that the CREATE block is frozen as the v0 baseline. The
+migration backfills each op from the message it came from, so existing rooms keep
+their ledgers — verified against the real database, where all 6 ops backfilled.
+
+**Quitting orphaned the brains.** `terminate` was only ever wired to a turn's
+AbortSignal, so closing the app left `claude`, `codex` and `cursor-agent` running
+against the user's account with nobody reading their output. There is now a child
+registry and a `shutdown` on SIGINT, SIGTERM and the orphan path. It signals the
+direct child only; the grandchild case is recorded in `spawn.ts` rather than
+assumed solved.
+
+**A rejected promise ended the daemon.** Express 4 does not forward rejections
+from async route handlers — there are seven — and there were no process-level
+handlers. Both are fixed, and `dm.ts` gained the turn deadline the scheduler
+already had, so a hung DM no longer leaves an agent on "Thinking" forever.
+
+**Adapter fixes**, each the difference between a turn that failed and one that
+looks fine: multi-block Claude prose was truncated to its last block (`=` not
+`+=`); an error arriving alongside any text was discarded outright, so a hard
+vendor failure read as an ordinary turn; `slice(...) ?? fallback` is dead code, so
+an empty stderr produced "X could not answer this round: "; a brain probe that
+*threw* was reported as *not installed*; and the final NDJSON line was dropped
+whenever a CLI ended without a trailing newline.
+
+**Two corrections to the plan**, both found by testing rather than reading:
+
+- The `rounds: NaN` case was written up as an unstoppable deliberation billing
+  forever. It is not: SQLite refuses the bind, so the route died with a 500 —
+  after the question had already been inserted, leaving the room showing a
+  question nobody was asked. Still worth fixing, and the fix now runs before
+  anything is written, but the severity was overstated.
+- The duplicate-position-label race does not exist. `createPosition` counts and
+  inserts with no await between, and Node is single-threaded. The real race is the
+  read *before* the await: a concurrent turn resolves its label and reads the
+  merge candidates while the first turn's insert is still pending, so its
+  endorsement is dropped as naming a position that does not exist and its
+  restatement opens a duplicate. Ledger writes are now serialised per room; the
+  turns stay parallel.
+
+**Storage.** `turn.started` stored both composed prompts in full — ~10KB per
+agent-turn, 90% of the database, several times the transcript anyone reads. It now
+stores a digest plus the steer verbatim, since a steer is the one part not
+recoverable elsewhere. `messages.raw` is written and never read back by anything;
+its cap dropped from 200KB to 8KB.
+
+Also: `npm test` did not glob `server/src/search/`, so a test written there would
+never have run.

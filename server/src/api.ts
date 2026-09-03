@@ -38,7 +38,17 @@ export function makeApi() {
 
   api.use(express.json({ limit: '8mb' }))
 
-  api.get('/bootstrap', async (_req, res) => {
+/**
+ * Express 4 does not forward a rejected promise from an async handler — it is
+ * simply dropped, and Node then treats it as an unhandled rejection. Every async
+ * route below therefore has to hand its failure to `next` by hand.
+ */
+const wrap = (fn: (req: express.Request, res: express.Response) => Promise<unknown>) =>
+  (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    void Promise.resolve(fn(req, res)).catch(next)
+  }
+
+  api.get('/bootstrap', wrap(async (_req, res) => {
     res.json({
       projects: db.listProjects(),
       rooms: db.listRooms(),
@@ -50,7 +60,7 @@ export function makeApi() {
         key: m, label: MODE_LABEL[m], blurb: MODE_BLURB[m],
       })),
     })
-  })
+  }))
 
   api.get('/rooms/:id/messages', (req, res) => {
     const room = db.getRoom(req.params.id)
@@ -62,7 +72,10 @@ export function makeApi() {
       positions: db.listPositions(req.params.id),
       sources: db.listSources(req.params.id),
       results: db.listResults(req.params.id),
-      ledger: room ? summarise(room.id, roster) : null,
+      // Scoped to the run in progress, or the most recent one. `positions` above
+      // stays room-wide: the Inspector's Positions tab is a room panel with no
+      // run selector, and scoping it would empty between deliberations.
+      ledger: room ? summarise(room.id, roster, currentRun(room.id)) : null,
     })
   })
 
@@ -94,22 +107,22 @@ export function makeApi() {
    * running. `semantic: null` means "not available", which the UI reports rather
    * than silently returning keyword hits and pretending they are the same thing.
    */
-  api.get('/search', async (req, res) => {
+  api.get('/search', wrap(async (req, res) => {
     const q = typeof req.query.q === 'string' ? req.query.q : ''
     const [keyword, semantic] = await Promise.all([
       Promise.resolve(db.searchMessages(q)),
       req.query.semantic === '0' ? Promise.resolve(null) : semanticSearch(q),
     ])
     res.json({ hits: keyword, semantic })
-  })
+  }))
 
-  api.get('/search/status', async (_req, res) => res.json(await embedderStatus()))
+  api.get('/search/status', wrap(async (_req, res) => res.json(await embedderStatus())))
 
-  api.post('/search/index', async (_req, res) => {
+  api.post('/search/index', wrap(async (_req, res) => {
     const r = await indexPending()
     db.logEvent('search.indexed', { payload: r })
     res.json({ ...r, status: await embedderStatus() })
-  })
+  }))
 
   // Persona lab (plan §5.1): same personas, different brains, side by side.
   api.post('/lab/experiments', (req, res) => {
@@ -173,7 +186,7 @@ export function makeApi() {
    * can navigate the app's own window away from the UI. Saving server-side works
    * identically in the app, in a browser and from curl, and needs no save dialog.
    */
-  api.post('/backup', async (req, res) => {
+  api.post('/backup', wrap(async (req, res) => {
     const dir = typeof req.body?.dir === 'string' && req.body.dir.trim()
       ? req.body.dir.trim()
       : join(homedir(), 'Downloads')
@@ -188,9 +201,9 @@ export function makeApi() {
     } catch (err) {
       res.status(500).json({ error: `backup failed: ${String(err)}` })
     }
-  })
+  }))
 
-  api.get('/backup', async (_req, res) => {
+  api.get('/backup', wrap(async (_req, res) => {
     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
     const name = `roundstorm-${stamp}.db`
     const tmp = join(tmpdir(), `${randomUUID()}.db`)
@@ -206,7 +219,7 @@ export function makeApi() {
       rmSync(tmp, { force: true })
       res.status(500).json({ error: `backup failed: ${String(err)}` })
     }
-  })
+  }))
 
   // Activity log as JSONL — the auditable stream, separate from the transcript.
   api.get('/events/export', (req, res) => {
@@ -304,7 +317,7 @@ export function makeApi() {
     res.json({ ok: true })
   })
 
-  api.post('/rooms/:id/messages', async (req, res) => {
+  api.post('/rooms/:id/messages', wrap(async (req, res) => {
     const room = db.getRoom(req.params.id)
     if (!room) return res.status(404).json({ error: 'no such room' })
     const { body, replyTo = null } = req.body ?? {}
@@ -326,7 +339,7 @@ export function makeApi() {
       void replyInDm(room, message)
     }
     res.json(message)
-  })
+  }))
 
   /**
    * Load an experiment file from the interface.
@@ -411,6 +424,11 @@ export function makeApi() {
     const q = String(question).trim() || lastHumanMessage(room.id)
     if (!q) return res.status(400).json({ error: 'ask a question first' })
 
+    // Before the question is inserted below. Validating after it meant a rejected
+    // request still left the room showing a question nobody was ever asked.
+    const n = roundsOrNull(rounds)
+    if (n === null) return res.status(400).json({ error: 'rounds must be a whole number from 1 to 20' })
+
     // A question typed into the deliberation sheet has to land in the transcript
     // too, otherwise the room opens with agents answering something the record
     // never shows. Skip it when the question already is the last thing said.
@@ -423,7 +441,7 @@ export function makeApi() {
     }
 
     const d = db.createDeliberation({
-      roomId: room.id, mode: mode as Mode, rounds: Math.max(1, Math.min(20, Number(rounds))),
+      roomId: room.id, mode: mode as Mode, rounds: n,
       style: style as Style, sealedOpening: !!sealedOpening, status: 'running',
       currentRound: 0, question: q, tier: tier as Tier,
     })
@@ -437,7 +455,9 @@ export function makeApi() {
   })
 
   api.post('/deliberations/:id/extend', (req, res) => {
-    extendDeliberation(req.params.id, Math.max(1, Number(req.body?.by ?? 1)))
+    const by = roundsOrNull(req.body?.by ?? 1)
+    if (by === null) return res.status(400).json({ error: 'by must be a whole number from 1 to 20' })
+    extendDeliberation(req.params.id, by)
     res.json(db.getDeliberation(req.params.id))
   })
 
@@ -452,12 +472,40 @@ export function makeApi() {
    */
   api.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     const message = err instanceof Error ? err.message : String(err)
-    db.logEvent('api.error', { payload: { message } })
-    console.error('[api]', message)
-    res.status(500).json({ error: message })
+    // express.json rejects a malformed body with a SyntaxError. That is the
+    // caller's mistake, not ours, and answering 500 sent them looking in the
+    // wrong place.
+    const bad = err instanceof SyntaxError && 'body' in (err as object)
+    db.logEvent('api.error', { payload: { message, status: bad ? 400 : 500 } })
+    if (!bad) console.error('[api]', message)
+    res.status(bad ? 400 : 500).json({ error: bad ? `malformed JSON body: ${message}` : message })
   })
 
   return api
+}
+
+/**
+ * Rounds, or nothing.
+ *
+ * This used to be `Math.max(1, Math.min(20, Number(rounds)))`. `Number('abc')` is
+ * NaN, and NaN passes through both Math calls untouched. SQLite then refuses the
+ * bind — `NOT NULL constraint failed: deliberations.rounds` — so the route died
+ * with a 500 and a stack trace, *after* the question had already been inserted
+ * into the transcript. The room was left showing a question nobody was asked.
+ *
+ * Reject it up front instead, before anything is written.
+ */
+function roundsOrNull(v: unknown): number | null {
+  const n = Number(v)
+  return Number.isInteger(n) && n >= 1 && n <= 20 ? n : null
+}
+
+/** The deliberation a room's headline should be about: the live one, else the last. */
+function currentRun(roomId: string): string | undefined {
+  const active = db.activeDeliberation(roomId)
+  if (active) return active.id
+  const all = db.listDeliberations(roomId)
+  return all.length ? all[all.length - 1].id : undefined
 }
 
 function lastHumanMessage(roomId: string): string {

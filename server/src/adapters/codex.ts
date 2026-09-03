@@ -130,7 +130,9 @@ function runCodex(req: TurnRequest, signal: AbortSignal): AsyncIterable<AdapterE
         // reporting it as the error hides the real cause.
         const noise = /Reading additional input from stdin/
         const tail = stderr.split('\n').filter(l => l.trim() && !noise.test(l)).join(' ').trim()
-        push({ type: 'error', message: failure ?? tail.slice(0, 400) ?? `codex exited ${code}` })
+        // `||`, not `??`: slice returns '' for empty stderr, never nullish, so the
+        // fallback below was unreachable and the agent failed with a blank reason.
+        push({ type: 'error', message: failure || tail.slice(0, 400) || `codex exited ${code}` })
       } else {
         // The schema-constrained answer arrives as the agent_message text.
         let structured: unknown = null

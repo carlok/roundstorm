@@ -207,16 +207,30 @@ export async function similarity(a: string, b: string): Promise<number | null> {
   }
 }
 
-/** Most similar candidate above `threshold`, or null. Vectors are pre-normalised. */
+export interface NearestResult {
+  /** The best candidate above `threshold`, if there is one. */
+  hit: { id: string; score: number } | null
+  /**
+   * False when the embedder could not be reached.
+   *
+   * This used to collapse into `hit: null` alongside "nothing matched", so an
+   * embedder that was simply down silently turned de-duplication off — and a room
+   * in complete agreement reported as fragmented with nothing in the record
+   * saying why. The caller needs to tell the two apart to say so.
+   */
+  available: boolean
+}
+
+/** Most similar candidate above `threshold`. Vectors are pre-normalised. */
 export async function nearest(
   query: string, candidates: { id: string; text: string }[], threshold: number,
-): Promise<{ id: string; score: number } | null> {
-  if (!candidates.length) return null
-  if (!await reachable()) return null
+): Promise<NearestResult> {
+  if (!candidates.length) return { hit: null, available: true }
+  if (!await reachable()) return { hit: null, available: false }
   try {
     const vecs = await embed([truncate(query), ...candidates.map(c => truncate(c.text))])
     const qv = vecs[0]
-    if (!qv) return null
+    if (!qv) return { hit: null, available: false }
     let best: { id: string; score: number } | null = null
     for (let i = 0; i < candidates.length; i++) {
       const v = vecs[i + 1]
@@ -227,8 +241,8 @@ export async function nearest(
         best = { id: candidates[i].id, score: dot }
       }
     }
-    return best
+    return { hit: best, available: true }
   } catch {
-    return null
+    return { hit: null, available: false }
   }
 }

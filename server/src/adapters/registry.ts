@@ -66,15 +66,32 @@ export async function probeBrains(force = false): Promise<BrainInfo[]> {
   if (cache && !force) return cache
 
   cache = await Promise.all(ADAPTERS.map(async a => {
-    const available = await a.available().catch(() => false)
-    const models = available ? await a.listModels().catch(() => []) : []
+    // An adapter that *throws* is a different thing from a CLI that is not
+    // installed, and reporting both as unavailable hid every bug in a probe
+    // behind "install it". Say which one happened.
+    let available = false
+    let broke: string | undefined
+    try {
+      available = await a.available()
+    } catch (e) {
+      broke = e instanceof Error ? e.message : String(e)
+    }
+    let models: Awaited<ReturnType<BrainAdapter['listModels']>> = []
+    if (available) {
+      try {
+        models = await a.listModels()
+      } catch (e) {
+        broke = e instanceof Error ? e.message : String(e)
+      }
+    }
     return {
       id: a.id, label: a.label, kind: a.kind,
       schemaEnforced: a.schemaEnforced,
       supportsSystemPrompt: a.supportsSystemPrompt,
       note: a.note, available, models,
-      warning: available && models.length === 0
-        ? 'reachable but returned no models' : undefined,
+      warning: broke ? `probe failed: ${broke.slice(0, 160)}`
+        : available && models.length === 0 ? 'reachable but returned no models'
+        : undefined,
     }
   }))
   return cache
