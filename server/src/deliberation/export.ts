@@ -81,11 +81,5 @@ export function renderCard(card: ResultCard, nameOf: (id: string | null) => stri
     section('Evidence', card.evidence),
     section('Unknowns', card.unknowns),
     section('Recommended next steps', card.nextSteps),
-    card.endorsements?.length
-      ? ['### Endorsements', '',
-         ...card.endorsements.map(e =>
-           `- **${nameOf(e.agentId)}**: ${e.restatement}${e.concession ? ` *(conceded: ${e.concession})*` : ''}`),
-         ''].join('\n')
-      : '',
   ].filter(Boolean).join('\n')
 }

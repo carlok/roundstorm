@@ -313,7 +313,8 @@ reuses its agents and room instead of accumulating copies.
 ## Driving it over HTTP
 
 The daemon is a plain HTTP service on `127.0.0.1:8787`, so anything that speaks
-HTTP can drive it. There is no auth because it binds to loopback.
+HTTP can drive it. There is no auth — see [Security](#security) for what that does
+and does not mean.
 
 Deliberations are asynchronous: start one, then poll the room or subscribe to the
 WebSocket at `/ws`.
@@ -425,9 +426,41 @@ server/src/
 web/src/                React UI
 ```
 
+## Security
+
+Roundstorm runs AI agents that can, at the upper tiers, read files and execute
+programs on this machine. Worth knowing before you raise a tier:
+
+**There is no authentication.** The daemon binds to `127.0.0.1` by default, so it
+is reachable by anything already running as you. That is the whole access control.
+
+**Websites cannot reach it.** A browser page is not "a local process", and the API
+used to reflect any `Origin` back, which let any site you visited read every
+transcript. The daemon now refuses requests whose `Origin` is not this app, and
+refuses a `Host` that is a name rather than an address, which is what stops DNS
+rebinding. The same check guards the WebSocket. Set `ROUNDSTORM_ALLOWED_ORIGINS`
+if you are serving the UI from somewhere unusual.
+
+**`ROUNDSTORM_HOST=0.0.0.0` hands the LAN an unauthenticated API** that can start
+processes here. The daemon prints a four-line warning when you do it. Trusted
+networks only, and only while you need it.
+
+**The tier flags are advisory, not a sandbox.** They are the per-CLI mode flags
+(`--sandbox`, `--mode ask`, `--mode plan`) plus a working directory passed as
+`--add-dir`/`--cd`. They fail closed: an unrecognised tier gets the most
+restrictive flags every adapter offers. But none of these CLIs confines shell
+execution to a directory, so **full local is full local** — treat it as running a
+program you did not write, because that is what it is. `docs/design.md` §9 has the
+exact tier-to-flag mapping and the limits.
+
+Found something? See [SECURITY.md](SECURITY.md).
+
 ## Licence
 
 MIT. See [LICENSE](LICENSE).
 
-No dependency constrains that choice: every runtime dependency is MIT, and there
-is no copyleft anywhere in the tree.
+No dependency constrains that choice. The npm production closure is 197 MIT, 4
+ISC, 1 BSD-3-Clause and 1 BSD-2-Clause — all permissive. The Rust side pulls in
+one weak-copyleft crate, `option-ext` (MPL-2.0), which is file-level copyleft and
+does not reach this project's own code; a Linux desktop build also links GTK and
+WebKitGTK, which are LGPL, dynamically.

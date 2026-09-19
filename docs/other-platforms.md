@@ -29,7 +29,7 @@ exercise the daemon's platform code, because the daemon is still running on macO
 ### 2. Run it properly on the machine
 
 ```bash
-git clone git@github.com:carlok/roundstorm.git
+git clone https://github.com/carlok/roundstorm.git
 cd roundstorm
 npm install
 npm run build

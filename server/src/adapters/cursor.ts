@@ -50,6 +50,19 @@ function scratchWorkspace(): string {
   return dir
 }
 
+/**
+ * Tier to mode flags. Exported because this is the safety-critical part.
+ *
+ * Named permissive branch, defaulted restrictive. The other way round meant an
+ * unrecognised tier matched neither test, got no `--mode` flag at all, and ran in
+ * cursor-agent's default agent mode: write and bash.
+ */
+export function cursorTierArgs(tier: string): string[] {
+  if (tier === 'full') return []            // agent mode, deliberately unflagged
+  if (tier === 'workstation') return ['--mode', 'plan']
+  return ['--mode', 'ask']
+}
+
 function runCursor(req: TurnRequest, signal: AbortSignal): AsyncIterable<AdapterEvent> {
   // No --system-prompt, and no schema: the persona AND the output contract both
   // ride in the user prompt. composeContext already appends PROMPT_CONTRACT for
@@ -77,8 +90,7 @@ function runCursor(req: TurnRequest, signal: AbortSignal): AsyncIterable<Adapter
   args.push('--model', req.model || 'auto')
   // Its read-only guarantee is a mode, not a kernel sandbox — advisory, and the
   // UI labels it as such. --print alone would grant write and bash.
-  if (req.tier === 'reasoning' || req.tier === 'research') args.push('--mode', 'ask')
-  else if (req.tier === 'workstation') args.push('--mode', 'plan')
+  args.push(...cursorTierArgs(req.tier))
 
   let text = ''
 

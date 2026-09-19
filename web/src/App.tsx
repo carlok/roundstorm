@@ -4,6 +4,7 @@ import { Avatar } from './components/Avatar.tsx'
 import { MessageView } from './components/MessageView.tsx'
 import { ControlBar } from './components/ControlBar.tsx'
 import { StartSheet, type StartPreset } from './components/StartSheet.tsx'
+import { TIER_LABEL } from '../../server/src/types.ts'
 import { SelectionBar } from './components/SelectionBar.tsx'
 import { SearchBar } from './components/SearchBar.tsx'
 import { ContextMenu, type MenuItem } from './components/ContextMenu.tsx'
@@ -23,12 +24,6 @@ import { installMathCopy } from './lib/mathcopy.ts'
 import { applyTitlebarInset } from './lib/api.ts'
 import type { Agent, Message, Room, Tier } from './types.ts'
 
-const TIER_LABEL: Record<Tier, string> = {
-  reasoning: '🔒 Reasoning only',
-  research: '🌐 Research tools',
-  workstation: '📖 Workstation (read-only)',
-  full: '⚠️ Full local',
-}
 
 export function App() {
   const rs = useRoundstorm()

@@ -688,12 +688,6 @@ export function setMemoryStatus(id: string, status: MemoryCard['status'], text?:
   return r ? toMemory(r) : undefined
 }
 
-export function touchMemory(ids: string[]) {
-  if (!ids.length) return
-  const stmt = db.prepare('UPDATE memory_cards SET last_used=? WHERE id=?')
-  for (const id of ids) stmt.run(now(), id)
-}
-
 // ---------- sources ----------
 
 const toSource = (r: any): Source => ({

@@ -46,7 +46,15 @@ fn main() {
                 let _ = std::fs::create_dir_all(dir);
             }
 
-            match spawn_daemon(&entry, &log_path) {
+            // The daemon refuses requests from origins it does not recognise, and
+            // the packaged page's origin is Tauri's business, not ours: it is
+            // `tauri://localhost` on macOS and Linux but `http(s)://tauri.localhost`
+            // on Windows. Reading it off the real window means the allowlist is
+            // right by construction instead of right by a table in a comment —
+            // and getting it wrong ships a blank window.
+            let origin = window_origin(app);
+
+            match spawn_daemon(&entry, &log_path, origin.as_deref()) {
                 Ok(child) => {
                     app.state::<Daemon>().0.lock().unwrap().replace(child);
                 }
@@ -77,7 +85,26 @@ fn main() {
         });
 }
 
-fn spawn_daemon(entry: &std::path::Path, log_path: &std::path::Path) -> std::io::Result<Child> {
+/// The origin the webview will actually send, read off the main window.
+///
+/// Built from scheme + host + port by hand on purpose. `Url::origin()` follows
+/// the URL spec, which calls a non-special scheme like `tauri:` opaque and
+/// serialises it as the literal string "null" — the one value the daemon must
+/// never allowlist, since any sandboxed iframe can produce it.
+fn window_origin(app: &tauri::App) -> Option<String> {
+    let url = app.get_webview_window("main")?.url().ok()?;
+    let host = url.host_str()?;
+    Some(match url.port() {
+        Some(port) => format!("{}://{}:{}", url.scheme(), host, port),
+        None => format!("{}://{}", url.scheme(), host),
+    })
+}
+
+fn spawn_daemon(
+    entry: &std::path::Path,
+    log_path: &std::path::Path,
+    origin: Option<&str>,
+) -> std::io::Result<Child> {
     // A GUI app launched from Finder does not inherit a login shell's PATH, so
     // the usual install locations have to be probed explicitly.
     let node = which_node().ok_or_else(|| {
@@ -100,6 +127,7 @@ fn spawn_daemon(entry: &std::path::Path, log_path: &std::path::Path) -> std::io:
         // The daemon exits on its own if this process dies without cleaning up
         // — a crash or a force-quit, which no exit handler can catch.
         .env("ROUNDSTORM_PARENT_PID", std::process::id().to_string())
+        .env("ROUNDSTORM_ALLOWED_ORIGINS", origin.unwrap_or_default())
         .stdout(Stdio::from(log))
         .stderr(Stdio::from(errlog))
         .spawn()

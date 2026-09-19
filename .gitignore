@@ -36,3 +36,9 @@ logs/
 *.swp
 .vscode/*
 !.vscode/extensions.json
+
+# Claude Code's per-user state. launch.json is shared config and is checked in;
+# settings.local.json accumulates permission allowlists and absolute paths, and is
+# one `git add .` from being published.
+.claude/*
+!.claude/launch.json

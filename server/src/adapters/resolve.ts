@@ -59,10 +59,7 @@ export function resolveBin(name: string): string | null {
   return found
 }
 
-export const hasBin = (name: string): boolean => resolveBin(name) !== null
 
-/** Discard cached lookups. Only useful in tests and after an install. */
-export const forgetResolved = (): void => cache.clear()
 
 /**
  * PATH to hand a spawned CLI. These tools shell out themselves — `claude` needs

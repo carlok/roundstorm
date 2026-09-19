@@ -2,9 +2,10 @@ import express from 'express'
 import { createReadStream, mkdirSync, rmSync, statSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { homedir, tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import * as db from './db.ts'
 import { bus } from './bus.ts'
+import { requestAllowed, warnRefused } from './http/origin.ts'
 import { ALL_PERSONAS } from './deliberation/personas.ts'
 import { MODE_BLURB, MODE_LABEL } from './deliberation/context.ts'
 import { listBrainOptions, probeBrains } from './adapters/registry.ts'
@@ -15,7 +16,8 @@ import { embedderStatus, indexPending, semanticSearch } from './search/embedding
 import { compare, createExperiment, reportArm } from './deliberation/personalab.ts'
 import { ConfigError, parseExperiment } from './headless/config.ts'
 import { setupExperiment } from './headless/run.ts'
-import type { Mode, Style, Tier } from './types.ts'
+import type { Agent, Mode, Style, Tier } from './types.ts'
+import { TIER_ORDER, isTier } from './types.ts'
 
 export function makeApi() {
   const api = express.Router()
@@ -25,13 +27,26 @@ export function makeApi() {
    * different origin from the daemon on 127.0.0.1. Without CORS every request
    * from the packaged app dies in preflight and the window just stays blank.
    *
-   * The daemon binds to loopback only, so this grants nothing a local process
-   * could not already do.
+   * This used to reflect whatever `Origin` arrived, justified by "the daemon
+   * binds to loopback, so this grants nothing a local process could not already
+   * do". A web page is not a local process: reflecting its origin let any site
+   * the user visited read every transcript in the database. See http/origin.ts.
    */
   api.use((req, res, next) => {
-    res.setHeader('access-control-allow-origin', req.headers.origin ?? '*')
-    res.setHeader('access-control-allow-headers', 'content-type')
-    res.setHeader('access-control-allow-methods', 'GET,POST,PATCH,DELETE,OPTIONS')
+    const origin = req.headers.origin
+    if (!requestAllowed(origin, req.headers.host)) {
+      warnRefused(origin, req.headers.host)
+      // No access-control-allow-origin on the refusal: a 403 that still echoes
+      // the origin is a 403 the caller can read.
+      return res.status(403).json({ error: 'refused: unrecognised Origin or Host' })
+    }
+    if (origin) {
+      res.setHeader('access-control-allow-origin', origin)
+      res.setHeader('vary', 'origin')
+      res.setHeader('access-control-allow-headers', 'content-type')
+      res.setHeader('access-control-allow-methods', 'GET,POST,PATCH,DELETE,OPTIONS')
+      res.setHeader('access-control-max-age', '600')
+    }
     if (req.method === 'OPTIONS') return res.sendStatus(204)
     next()
   })
@@ -131,6 +146,9 @@ const wrap = (fn: (req: express.Request, res: express.Response) => Promise<unkno
       return res.status(400).json({ error: 'projectId, title, personaKeys and arms required' })
     }
     if (arms.length < 2) return res.status(400).json({ error: 'a comparison needs at least two arms' })
+    if (tier !== undefined && !isTier(tier)) {
+      return res.status(400).json({ error: `tier ${tierError.error}` })
+    }
     const out = createExperiment({ projectId, title, personaKeys, arms, tier })
     db.logEvent('lab.created', { payload: { title, arms: arms.length, rooms: out.rooms.map(r => r.id) } })
     res.json(out)
@@ -187,9 +205,12 @@ const wrap = (fn: (req: express.Request, res: express.Response) => Promise<unkno
    * identically in the app, in a browser and from curl, and needs no save dialog.
    */
   api.post('/backup', wrap(async (req, res) => {
-    const dir = typeof req.body?.dir === 'string' && req.body.dir.trim()
-      ? req.body.dir.trim()
-      : join(homedir(), 'Downloads')
+    // Deliberately not caller-supplied. This used to take `req.body.dir` and
+    // mkdirSync it recursively, so any page that could reach the API could create
+    // directory trees anywhere the daemon's user can write. No caller ever sent
+    // it — both buttons POST with no body — so the parameter was pure surface.
+    // The env var keeps the escape hatch somewhere a web page cannot set it.
+    const dir = process.env.ROUNDSTORM_BACKUP_DIR?.trim() || join(homedir(), 'Downloads')
     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
     const path = join(dir, `roundstorm-${stamp}.db`)
     try {
@@ -276,12 +297,16 @@ const wrap = (fn: (req: express.Request, res: express.Response) => Promise<unkno
   api.post('/rooms', (req, res) => {
     const { projectId, name, kind = 'room', memberIds = [], tier = 'research' } = req.body ?? {}
     if (!projectId || !name) return res.status(400).json({ error: 'projectId and name required' })
+    if (!isTier(tier)) return res.status(400).json({ error: `tier ${tierError.error}` })
     res.json(db.createRoom(projectId, name, kind, memberIds, tier))
   })
 
   api.patch('/rooms/:id', (req, res) => {
     const { tier, memberIds, name } = req.body ?? {}
-    if (tier) db.setRoomTier(req.params.id, tier as Tier)
+    if (tier !== undefined) {
+      if (!isTier(tier)) return res.status(400).json({ error: `tier ${tierError.error}` })
+      db.setRoomTier(req.params.id, tier)
+    }
     if (typeof name === 'string' && name.trim()) db.renameRoom(req.params.id, name.trim())
     if (Array.isArray(memberIds)) db.setRoomMembers(req.params.id, memberIds)
     res.json(db.getRoom(req.params.id))
@@ -300,7 +325,21 @@ const wrap = (fn: (req: express.Request, res: express.Response) => Promise<unkno
 
   api.patch('/projects/:id', (req, res) => {
     const { name, workingDir, defaultTier } = req.body ?? {}
-    const p = db.updateProject(req.params.id, { name, workingDir, defaultTier })
+    if (defaultTier !== undefined && !isTier(defaultTier)) {
+      return res.status(400).json({ error: `defaultTier ${tierError.error}` })
+    }
+    // The working directory is the only thing standing between the workstation
+    // tiers and the whole machine, so it is resolved and checked here rather than
+    // taken as a string. Resolving matters on its own: a relative path resolves
+    // against the daemon's cwd, which for a Finder-launched app is `/`.
+    let dir = workingDir
+    if (typeof dir === 'string' && dir.trim()) {
+      dir = resolve(dir.trim())
+      if (!isDirectory(dir)) return res.status(400).json({ error: `no such directory: ${dir}` })
+    } else if (dir !== undefined) {
+      dir = null  // explicit clear
+    }
+    const p = db.updateProject(req.params.id, { name, workingDir: dir, defaultTier })
     if (!p) return res.status(404).json({ error: 'no such project' })
     db.logEvent('project.updated', { payload: { workingDir: p.workingDir } })
     res.json(p)
@@ -386,10 +425,25 @@ const wrap = (fn: (req: express.Request, res: express.Response) => Promise<unkno
       personaExtra: b.personaExtra ?? '',
       brain: b.brain ?? 'claude',
       model: b.model ?? null,
-      tierCeiling: b.tierCeiling ?? 'research',
+      tierCeiling: b.tierCeiling ?? 'research',  // validated above
     }))
   })
-  api.patch('/agents/:id', (req, res) => res.json(db.updateAgent(req.params.id, req.body)))
+  api.patch('/agents/:id', (req, res) => {
+    const b = req.body ?? {}
+    if (b.tierCeiling !== undefined && !isTier(b.tierCeiling)) {
+      return res.status(400).json({ error: `tierCeiling ${tierError.error}` })
+    }
+    // A whitelist, not the body. Spreading the body into the row let a caller set
+    // any column the mapper happened to read.
+    const patch: Partial<Agent> = {}
+    for (const k of ['name', 'role', 'avatarColor', 'personaKey', 'personaExtra',
+                     'brain', 'model', 'tierCeiling'] as const) {
+      if (b[k] !== undefined) (patch as Record<string, unknown>)[k] = b[k]
+    }
+    const agent = db.updateAgent(req.params.id, patch)
+    if (!agent) return res.status(404).json({ error: 'no such agent' })
+    res.json(agent)
+  })
 
   api.delete('/agents/:id', (req, res) => {
     const agent = db.getAgent(req.params.id)
@@ -420,6 +474,10 @@ const wrap = (fn: (req: express.Request, res: express.Response) => Promise<unkno
       mode = 'deliberation', rounds = 4, style = 'parallel',
       sealedOpening = true, question = '', tier = room.tier,
     } = req.body ?? {}
+
+    // The default is the room's own tier, which a pre-fix database may hold as
+    // junk, so this validates the default too rather than only the override.
+    if (!isTier(tier)) return res.status(400).json({ error: `tier ${tierError.error}` })
 
     const q = String(question).trim() || lastHumanMessage(room.id)
     if (!q) return res.status(400).json({ error: 'ask a question first' })
@@ -495,6 +553,20 @@ const wrap = (fn: (req: express.Request, res: express.Response) => Promise<unkno
  *
  * Reject it up front instead, before anything is written.
  */
+/**
+ * A tier decides what an agent may do to the machine, so it is never taken on
+ * trust from a request body.
+ *
+ * `PATCH /agents/:id` used to be `db.updateAgent(id, req.body)` — the whole body,
+ * unvalidated — and the lookups downstream failed open for anything they did not
+ * recognise. That is an unauthenticated path from a web page to write and shell.
+ */
+const tierError = { error: `must be one of ${TIER_ORDER.join(', ')}` }
+
+const isDirectory = (p: string): boolean => {
+  try { return statSync(p).isDirectory() } catch { return false }
+}
+
 function roundsOrNull(v: unknown): number | null {
   const n = Number(v)
   return Number.isInteger(n) && n >= 1 && n <= 20 ? n : null

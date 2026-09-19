@@ -6,6 +6,7 @@
  * model call is billed.
  */
 import type { Mode, Style, Tier } from '../types.ts'
+import { TIER_ORDER, isTier } from '../types.ts'
 
 export interface AgentSpec {
   name: string
@@ -33,7 +34,6 @@ export interface ExperimentConfig {
 
 const MODES: Mode[] = ['brainstorm', 'critique', 'deliberation', 'consensus', 'research_plan', 'conclave']
 const STYLES: Style[] = ['parallel', 'pingpong']
-const TIERS: Tier[] = ['reasoning', 'research', 'workstation', 'full']
 
 /**
  * Strip comments and trailing commas so a config can be commented.
@@ -95,8 +95,8 @@ export function validateExperiment(raw: unknown): ExperimentConfig {
   if (!roomName) fail('"room.name" is required')
 
   const tier = room?.tier === undefined ? 'research' : room.tier
-  if (!TIERS.includes(tier as Tier)) {
-    fail(`"room.tier" must be one of ${TIERS.join(', ')} (got ${JSON.stringify(tier)})`)
+  if (!isTier(tier)) {
+    fail(`"room.tier" must be one of ${TIER_ORDER.join(', ')} (got ${JSON.stringify(tier)})`)
   }
 
   if (!Array.isArray(c.agents) || c.agents.length === 0) {
@@ -165,8 +165,8 @@ function validateAgent(raw: unknown, index: number): AgentSpec {
   }
 
   const tierCeiling = a.tierCeiling === undefined ? 'research' : a.tierCeiling
-  if (!TIERS.includes(tierCeiling as Tier)) {
-    fail(`${where}.tierCeiling must be one of ${TIERS.join(', ')}`)
+  if (!isTier(tierCeiling)) {
+    fail(`${where}.tierCeiling must be one of ${TIER_ORDER.join(', ')}`)
   }
 
   return {

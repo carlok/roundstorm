@@ -43,6 +43,17 @@ export const agyAdapter: BrainAdapter = {
   },
 }
 
+/**
+ * Tier to sandbox flags. See cursor.ts: the trailing `else` used to hand write
+ * access to any tier string it did not recognise, which is the opposite of what a
+ * ceiling is for.
+ */
+export function agyTierArgs(tier: string): string[] {
+  if (tier === 'full') return ['--mode', 'accept-edits']
+  if (tier === 'workstation') return ['--mode', 'plan']
+  return ['--sandbox']
+}
+
 function runAgy(req: TurnRequest, signal: AbortSignal): AsyncIterable<AdapterEvent> {
   const prompt = `${req.systemPrompt}\n\n---\n\n${req.userPrompt}`
 
@@ -53,9 +64,7 @@ function runAgy(req: TurnRequest, signal: AbortSignal): AsyncIterable<AdapterEve
     '--disable-slash-commands',
   ]
   if (req.model) args.push('--model', req.model)
-  if (req.tier === 'reasoning' || req.tier === 'research') args.push('--sandbox')
-  else if (req.tier === 'workstation') args.push('--mode', 'plan')
-  else args.push('--mode', 'accept-edits')
+  args.push(...agyTierArgs(req.tier))
   if (req.tier !== 'reasoning' && req.workingDir) args.push('--add-dir', req.workingDir)
 
   let response = ''
@@ -94,12 +103,4 @@ function runAgy(req: TurnRequest, signal: AbortSignal): AsyncIterable<AdapterEve
       push({ type: 'final', structured, text: response })
     },
   })
-}
-
-/** agy has no per-tool deny list; the coarse dials are all it exposes. */
-export const AGY_TIER_NOTE: Record<Tier, string> = {
-  reasoning: 'sandboxed',
-  research: 'sandboxed',
-  workstation: 'plan mode (read-only)',
-  full: 'accept-edits',
 }

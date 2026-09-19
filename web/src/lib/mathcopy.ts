@@ -55,12 +55,3 @@ export function installMathCopy(): () => void {
   return () => document.removeEventListener('copy', onCopy)
 }
 
-/** Same rewrite, for code paths that build clipboard text themselves. */
-export function texify(root: DocumentFragment | Element): string {
-  const clone = root.cloneNode(true) as Element
-  for (const node of clone.querySelectorAll('.katex')) {
-    const tex = node.querySelector('annotation[encoding="application/x-tex"]')?.textContent
-    if (tex) node.replaceWith(document.createTextNode(`$${tex}$`))
-  }
-  return (clone.textContent ?? '').replace(/​/g, '').trim()
-}

@@ -3,6 +3,18 @@
 export type Tier = 'reasoning' | 'research' | 'workstation' | 'full'
 
 export const TIER_ORDER: Tier[] = ['reasoning', 'research', 'workstation', 'full']
+
+/**
+ * Is this a tier?
+ *
+ * Every tier lookup is a Record keyed by the four names, and an unrecognised key
+ * yields `undefined` rather than throwing — which in two adapters meant the
+ * restrictive branch was skipped and the permissive default applied. So the
+ * string has to be checked before it is stored, and the lookups have to fail
+ * closed anyway. Both, not either.
+ */
+export const isTier = (v: unknown): v is Tier =>
+  typeof v === 'string' && (TIER_ORDER as readonly string[]).includes(v)
 export const TIER_LABEL: Record<Tier, string> = {
   reasoning: 'Reasoning only',
   research: 'Research tools',
@@ -179,7 +191,6 @@ export interface ResultCard {
   unknowns: string[]
   nextSteps: string[]
   /** Conclave only. */
-  endorsements?: { agentId: string; restatement: string; concession: string }[]
   proposalVersion?: number
   failureReason?: string
 }

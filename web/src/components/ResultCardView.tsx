@@ -47,14 +47,6 @@ export function ResultCardView({ card, onCopy }: { card: ResultCard; onCopy: (c:
           <List title="Unknowns" items={card.unknowns} />
           <List title="Recommended next steps" items={card.nextSteps} />
 
-          {card.endorsements?.length ? (
-            <Section title="Endorsements">
-              <ul>{card.endorsements.map((e, i) => (
-                <li key={i}>{e.restatement}{e.concession ? ` — conceded: ${e.concession}` : ''}</li>
-              ))}</ul>
-            </Section>
-          ) : null}
-
           <div className="result-actions">
             <button onClick={() => onCopy(card)}>Copy as Markdown</button>
           </div>

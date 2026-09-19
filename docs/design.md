@@ -404,12 +404,19 @@ One room-level dial, four stops, mapped per-brain to real sandbox flags. The roo
 | **Workstation (read-only)** | + read files, run read-only computations in a scoped dir | 📖 |
 | **Full local** | + write files, execute programs, run simulations | ⚠️ |
 
-Rules:
+Rules, as built:
 - The tier is visible in the room header at all times. Not buried in settings.
-- Raising a tier is an explicit dialog naming what becomes possible.
-- **Full local** requires choosing a working directory; agents cannot reach outside it.
-- Destructive-looking actions (delete, network POST, `sudo`, package installs) pause the deliberation and prompt — with the exact command shown. Nothing irreversible happens invisibly.
-- Every tool call is logged with its full command and result regardless of tier.
+- Raising a tier is a labelled control in the room editor, with the meaning of each stop written beside it.
+- The tiers above Research need a working directory, and one that still exists. It is re-checked every turn, so a directory deleted mid-run downgrades the tier rather than letting the agent run wherever the daemon happens to be.
+- Tier values are validated at every route that accepts one, and every tier→flag lookup treats an unrecognised value as the *most restrictive* tier. An unknown tier must never fall through to a permissive default.
+- Every tool call is logged as a `tool.used` event. The prompts themselves are logged as a digest, not verbatim — see §12.
+
+**What this does not do, stated plainly**, because an earlier draft of this section
+promised both and a reader could reasonably have relied on it:
+
+- **Agents are not confined to the working directory.** The directory is passed as `--add-dir` / `--cd` / `--workspace`, which scopes what the CLI *offers* the model. None of these tools confines shell execution to it. At **Full local** an agent can act outside the working directory, so treat that tier as running a program you have not reviewed.
+- **There is no approval prompt before a destructive tool call.** The pause-and-confirm mechanism this section once described is not implemented. Nothing stands between a full-tier agent and a `rm` except the CLI's own defaults.
+- **Claude's gating is a deny-list**, computed by subtracting the tier's allowed tools from a hardcoded snapshot of tool names. A tool that Claude Code gains after that snapshot was written is not in the list, so it is not denied. An allow-list would be correct; this is not one yet.
 
 Tier → flag mapping, verified:
 
@@ -421,6 +428,8 @@ Tier → flag mapping, verified:
 | Full local | `--add-dir <wd>` + write tools | `--add-dir <wd>`, `--mode accept-edits` | `-C <wd> -s workspace-write` | `--workspace <wd> --sandbox enabled -f` |
 
 `cursor-agent` is the coarsest of the four: `--print` grants all tools including write and bash, and the read-only guarantee rests on `--mode plan|ask` rather than a kernel sandbox. Treat its Reasoning-only and Research tiers as *advisory*, mark them as such in the UI, and never hand it a working directory containing anything you would mind it touching.
+
+The mapping above fails closed: a tier string the adapter does not recognise gets `--mode ask` (cursor), `--sandbox` (agy), `read-only` (codex) and no tools at all (claude). It did not always — cursor and agy tested for the *restrictive* tiers and let everything else through, so an unvalidated `tierCeiling` reaching them meant write and shell.
 
 `--dangerously-skip-permissions` / `--dangerously-bypass-approvals-and-sandbox` are never used. If a brain cannot express a tier, the agent is shown as capped at the highest tier it *can* honor — silently over-granting is the one failure mode that must not exist.
 

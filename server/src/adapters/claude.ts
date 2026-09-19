@@ -18,9 +18,10 @@
 import { spawn } from 'node:child_process'
 import type { AdapterEvent, BrainAdapter, TurnRequest } from './types.ts'
 import type { Tier } from '../types.ts'
+import { isTier } from '../types.ts'
 import { resolveBin, spawnEnv } from './resolve.ts'
 import { checkCommandLine, needsShell } from './platform.ts'
-import { terminate, trackChild, untrackChild } from './spawn.ts'
+import { terminate, trackChild, untrackChild, which } from './spawn.ts'
 
 const ALL_TOOLS = [
   'Task', 'Artifact', 'Bash', 'CronCreate', 'CronDelete', 'CronList', 'DesignSync',
@@ -76,8 +77,16 @@ export const claudeAdapter: BrainAdapter = {
   },
 }
 
+/**
+ * Tools granted at a tier. `?? []` is what the lookup already did by accident —
+ * `new Set(undefined)` is empty, so every tool ends up denied. Said out loud so it
+ * stays true, and so it can be asserted.
+ */
+export const claudeToolsFor = (tier: string): readonly string[] =>
+  isTier(tier) ? TIER_TOOLS[tier] : []
+
 async function* runClaude(req: TurnRequest, signal: AbortSignal): AsyncIterable<AdapterEvent> {
-  const keep = new Set(TIER_TOOLS[req.tier])
+  const keep = new Set(claudeToolsFor(req.tier))
   const deny = ALL_TOOLS.filter(t => !keep.has(t))
 
   const args = [
@@ -219,4 +228,3 @@ async function* runClaude(req: TurnRequest, signal: AbortSignal): AsyncIterable<
   }
 }
 
-export const which = async (bin: string): Promise<boolean> => resolveBin(bin) !== null

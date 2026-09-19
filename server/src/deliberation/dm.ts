@@ -4,6 +4,7 @@
  * thing a researcher does after reading a transcript, so it gets its own path.
  */
 import type { Message, Room } from '../types.ts'
+import { createHash } from 'node:crypto'
 import * as db from '../db.ts'
 import { bus } from '../bus.ts'
 import { getAdapter, schemaFor } from '../adapters/registry.ts'
@@ -45,7 +46,14 @@ export async function replyInDm(room: Room, trigger: Message) {
 
   db.logEvent('turn.started', {
     roomId: room.id, agentId: agent.id,
-    payload: { dm: true, brain: agent.brain, model: agent.model, systemPrompt, userPrompt },
+    payload: {
+      dm: true, brain: agent.brain, model: agent.model,
+      systemPromptBytes: Buffer.byteLength(systemPrompt),
+      userPromptBytes: Buffer.byteLength(userPrompt),
+      promptDigest: createHash('sha256')
+        .update(systemPrompt).update('\u0000').update(userPrompt)
+        .digest('hex').slice(0, 16),
+    },
   })
 
   // The scheduler gives every turn a deadline; a DM had none. A brain that hung
@@ -91,11 +99,23 @@ export async function replyInDm(room: Room, trigger: Message) {
   // unhandled rejection — which, with no process handler, ended the daemon.
   try {
   const parsed = coerceTurn(structured ?? extractJson(text), stripJsonBlock(text))
+
+  // Same rule as a deliberation turn: an error that arrived alongside text is
+  // kept, but must never read as a clean reply. Claude and cursor both produce
+  // that shape when they fail after streaming.
+  if (err) {
+    parsed.degraded = true
+    db.logEvent('turn.degraded', {
+      roomId: room.id, agentId: agent.id, payload: { dm: true, error: err, kept: text.length },
+    })
+    parsed.turn.body = `${parsed.turn.body}\n\n_(${agent.name}'s brain reported an error `
+      + `partway through: ${err.slice(0, 200)}. What is above may be incomplete.)_`
+  }
   const message = db.insertMessage({
     roomId: room.id, authorType: 'agent', authorId: agent.id,
     body: parsed.turn.body, stance: parsed.turn.stance, claims: parsed.turn.claims,
     degraded: parsed.degraded, brain: agent.brain, model: agent.model, costUsd,
-    raw: JSON.stringify({ structured, text }).slice(0, 200_000),
+    raw: JSON.stringify({ structured, text }).slice(0, 8_000),
   })
   db.logEvent('turn.completed', {
     roomId: room.id, agentId: agent.id,

@@ -155,4 +155,3 @@ function relax(node: unknown): unknown {
   return node
 }
 
-export { which }

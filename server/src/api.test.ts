@@ -88,3 +88,70 @@ test('a 404 is a 404, not an empty 200', async () => {
   const res = await post('/api/rooms/no-such-room/deliberations', { question: 'x' })
   assert.equal(res.status, 404)
 })
+
+// --- privilege fields ---
+
+/** An agent with a known ceiling, to prove a refused request changed nothing. */
+function agent(name: string) {
+  return db.createAgent({
+    name, role: '', avatarColor: '#000', personaKey: 'skeptic', personaExtra: '',
+    brain: 'stub', model: 'm', tierCeiling: 'research',
+  } as never)
+}
+
+const patch = (path: string, body: unknown) =>
+  fetch(`${origin}${path}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+
+test('an agent ceiling cannot be raised by a request body', async () => {
+  // This route was `res.json(db.updateAgent(req.params.id, req.body))` — the whole
+  // body, unvalidated, into a row spread. With the adapters failing open on an
+  // unrecognised tier, that was an unauthenticated path to write and shell.
+  const a = agent('ceiling-check')
+  const res = await patch(`/api/agents/${a.id}`, { tierCeiling: 'workstation ' })
+
+  assert.equal(res.status, 400, `answered ${res.status}`)
+  assert.equal(db.getAgent(a.id)!.tierCeiling, 'research',
+    'the ceiling was written even though the request was refused')
+})
+
+test('a legitimate agent edit still works', async () => {
+  const a = agent('edit-check')
+  const res = await patch(`/api/agents/${a.id}`, { tierCeiling: 'workstation', role: 'analyst' })
+  assert.equal(res.status, 200)
+  assert.equal(db.getAgent(a.id)!.tierCeiling, 'workstation')
+  assert.equal(db.getAgent(a.id)!.role, 'analyst')
+})
+
+test('editing an agent that does not exist is a 404, not an empty 200', async () => {
+  const res = await patch('/api/agents/no-such-agent', { role: 'x' })
+  assert.equal(res.status, 404)
+})
+
+test('a room tier cannot be set to something the adapters do not know', async () => {
+  const r = room('tier-check')
+  const res = await patch(`/api/rooms/${r.id}`, { tier: '__proto__' })
+  assert.equal(res.status, 400)
+  assert.equal(db.getRoom(r.id)!.tier, 'reasoning', 'the tier was written anyway')
+})
+
+test('a project working directory must exist', async () => {
+  const p = db.createProject('workdir-check')
+  const res = await patch(`/api/projects/${p.id}`, { workingDir: '/definitely/not/here' })
+  assert.equal(res.status, 400)
+  assert.match((await res.json()).error, /no such directory/)
+  assert.equal(db.getProject(p.id)!.workingDir, null)
+})
+
+test('a working directory is stored resolved, not as given', async () => {
+  // A relative path resolves against the daemon's cwd, which for a Finder-launched
+  // app is `/` — the case resolveWorkspace's own comment is written to prevent.
+  const p = db.createProject('workdir-resolve')
+  const res = await patch(`/api/projects/${p.id}`, { workingDir: '.' })
+  assert.equal(res.status, 200)
+  const stored = db.getProject(p.id)!.workingDir!
+  assert.ok(stored.startsWith('/'), `stored as ${stored}`)
+})

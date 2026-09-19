@@ -18,6 +18,7 @@ import type { AdapterEvent, BrainAdapter, TurnRequest } from './types.ts'
 import { streamProcess, which } from './spawn.ts'
 import { DATA_PATH, logEvent } from '../db.ts'
 import type { Tier } from '../types.ts'
+import { isTier } from '../types.ts'
 
 const SANDBOX: Record<Tier, string> = {
   reasoning: 'read-only',
@@ -25,6 +26,17 @@ const SANDBOX: Record<Tier, string> = {
   workstation: 'read-only',
   full: 'workspace-write',
 }
+
+/**
+ * An unknown tier put `undefined` straight into argv and the spawn threw.
+ *
+ * Guarded with `isTier` rather than `??`, because a plain object lookup of
+ * `'__proto__'` returns `Object.prototype` — truthy, so the fallback never fires
+ * and a garbage string produces a garbage flag instead of a safe one.
+ */
+export const codexSandboxFor = (tier: string): string =>
+  isTier(tier) ? SANDBOX[tier] : 'read-only'
+
 
 /** A CODEX_HOME with no skills, no rules, no config — but the real credentials. */
 function isolatedHome(): string {
@@ -89,7 +101,7 @@ function runCodex(req: TurnRequest, signal: AbortSignal): AsyncIterable<AdapterE
   const args = [
     'exec', prompt,
     '--json',
-    '--sandbox', SANDBOX[req.tier],
+    '--sandbox', codexSandboxFor(req.tier),
     '--skip-git-repo-check',
     '--ephemeral',
     '--output-schema', schemaPath,

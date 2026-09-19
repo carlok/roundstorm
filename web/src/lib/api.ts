@@ -14,8 +14,13 @@ function resolveBase(): string {
   const { protocol, host } = window.location
   // Dev server: keep relative so the proxy stays in charge.
   if (protocol.startsWith('http') && DEV_ORIGINS.includes(host)) return ''
-  // Anything else (tauri://, file://, a built page served elsewhere) needs the
-  // daemon's real address.
+  // Served over http by the daemon itself — on whatever port it was given, and
+  // possibly over the LAN. Relative is both correct and same-origin. This used to
+  // return the hardcoded address below, so a daemon on any other port served a UI
+  // that called port 8787 and quietly failed.
+  if (protocol.startsWith('http')) return ''
+  // tauri:// and file://, where a relative /api resolves against an origin that
+  // serves no API: the black-window case. Only here is an absolute address right.
   return 'http://127.0.0.1:8787'
 }
 

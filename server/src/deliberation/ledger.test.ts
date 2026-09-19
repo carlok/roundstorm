@@ -5,7 +5,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -115,12 +115,14 @@ test('search finds a message by substring and never returns sealed turns', async
   assert.ok(hits[0].snippet.includes('bifurcation'))
 })
 
-test('a restatement under a new title is merged into the position that already said it', async () => {
+test('a restatement under a new title is merged into the position that already said it', async t => {
   // The failure this prevents: a room in unanimous agreement reporting "no
   // reliable conclusion" because each agent opened its own phrasing of one idea.
-  // Needs a local embedder; skipped rather than silently passing without one.
   const { similarity } = await import('../search/embeddings.ts')
-  if (await similarity('a', 'b') === null) return
+  // A bare `return` here is a silent PASS, not a skip — which is how the
+  // position-merge path, the subtlest logic in the product, reported green with
+  // zero coverage on every machine without a local embedder.
+  if (await similarity('a', 'b') === null) return t.skip('needs a local embedder')
 
   const roster2 = [A, B, C]
   const r2 = db.createRoom(project.id, 'Dedup', 'room', roster2.map(a => a.id))
@@ -145,9 +147,12 @@ test('a restatement under a new title is merged into the position that already s
   assert.equal(summarise(r2.id, roster2).level, 'strong_consensus')
 })
 
-test('a genuinely different position is not merged away', async () => {
+test('a genuinely different position is not merged away', async t => {
   const { similarity } = await import('../search/embeddings.ts')
-  if (await similarity('a', 'b') === null) return
+  // A bare `return` here is a silent PASS, not a skip — which is how the
+  // position-merge path, the subtlest logic in the product, reported green with
+  // zero coverage on every machine without a local embedder.
+  if (await similarity('a', 'b') === null) return t.skip('needs a local embedder')
 
   const r3 = db.createRoom(project.id, 'NoDedup', 'room', [A.id, B.id])
   const put = (agent: typeof A, title: string, text: string) =>
@@ -164,11 +169,14 @@ test('a genuinely different position is not merged away', async () => {
   assert.equal(db.listPositions(r3.id).length, 2)
 })
 
-test('a blind restatement is recorded as co-assertion, not as endorsing the unseen', async () => {
+test('a blind restatement is recorded as co-assertion, not as endorsing the unseen', async t => {
   // In a sealed round nobody can see the other positions, so recording a merged
   // restatement as "endorse" claims an agreement that never happened.
   const { similarity } = await import('../search/embeddings.ts')
-  if (await similarity('a', 'b') === null) return
+  // A bare `return` here is a silent PASS, not a skip — which is how the
+  // position-merge path, the subtlest logic in the product, reported green with
+  // zero coverage on every machine without a local embedder.
+  if (await similarity('a', 'b') === null) return t.skip('needs a local embedder')
 
   const r = db.createRoom(project.id, 'Blind', 'room', [A.id, B.id])
   const put = (agent: typeof A, title: string, text: string, blind: boolean) =>
@@ -189,9 +197,12 @@ test('a blind restatement is recorded as co-assertion, not as endorsing the unse
   assert.ok(p[0].stances.some(s => /independently stated/.test(s.note)))
 })
 
-test('a sighted restatement IS an endorsement', async () => {
+test('a sighted restatement IS an endorsement', async t => {
   const { similarity } = await import('../search/embeddings.ts')
-  if (await similarity('a', 'b') === null) return
+  // A bare `return` here is a silent PASS, not a skip — which is how the
+  // position-merge path, the subtlest logic in the product, reported green with
+  // zero coverage on every machine without a local embedder.
+  if (await similarity('a', 'b') === null) return t.skip('needs a local embedder')
 
   const r = db.createRoom(project.id, 'Sighted', 'room', [A.id, B.id])
   await applyPositionOps({
@@ -239,13 +250,33 @@ test('file access is refused when no working directory is set', async () => {
 
 test('file access is granted once a working directory exists', async () => {
   const { resolveWorkspaceForTest } = await import('./scheduler.ts')
-  const proj = db.createProject('WithDir', '/tmp/rs-workspace')
+  // A real directory. This used to name a path that did not exist and still
+  // asserted `full`, which is exactly the gap: the only gate was "is this string
+  // non-empty".
+  const dir = mkdtempSync(join(tmpdir(), 'rs-workspace-'))
+  const proj = db.createProject('WithDir', dir)
   const r = db.createRoom(proj.id, 'WithDir room', 'room', [A.id], 'full')
 
   const got = resolveWorkspaceForTest(r, 'full')
   assert.equal(got.tier, 'full')
-  assert.equal(got.workingDir, '/tmp/rs-workspace')
+  assert.equal(got.workingDir, dir)
   assert.equal(got.downgraded, false)
+})
+
+test('file access is withdrawn if the working directory goes away mid-run', async () => {
+  const { resolveWorkspaceForTest } = await import('./scheduler.ts')
+  const dir = mkdtempSync(join(tmpdir(), 'rs-workspace-gone-'))
+  const proj = db.createProject('GoneDir', dir)
+  const r = db.createRoom(proj.id, 'GoneDir room', 'room', [A.id], 'full')
+  assert.equal(resolveWorkspaceForTest(r, 'full').tier, 'full')
+
+  rmSync(dir, { recursive: true, force: true })
+
+  const got = resolveWorkspaceForTest(r, 'full')
+  assert.equal(got.tier, 'research', 'full tier survived a working directory that is gone')
+  assert.equal(got.workingDir, null)
+  assert.equal(got.downgraded, true)
+  assert.match(got.reason!, /no longer exists/)
 })
 
 test('reasoning and research never need a directory', async () => {

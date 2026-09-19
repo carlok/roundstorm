@@ -12,7 +12,9 @@
  * Sealed opening: round 1 is written blind and revealed together.
  */
 import type { Agent, Deliberation, Message, Room, Tier } from '../types.ts'
+import { isTier } from '../types.ts'
 import { createHash } from 'node:crypto'
+import { statSync } from 'node:fs'
 import * as db from '../db.ts'
 import { bus } from '../bus.ts'
 import { getAdapter, schemaFor } from '../adapters/registry.ts'
@@ -33,7 +35,6 @@ const running = new Map<string, Running>()
 /** Per-turn deadline. Generous, because a tool-using turn can legitimately be slow. */
 export const TURN_TIMEOUT_MS = Number(process.env.ROUNDSTORM_TURN_TIMEOUT_MS ?? 6 * 60_000)
 
-export const isRunning = (deliberationId: string) => running.has(deliberationId)
 
 export function stopDeliberation(id: string) {
   const r = running.get(id)
@@ -246,7 +247,9 @@ export async function runTurn(args: {
   if (workspace.downgraded) {
     db.logEvent('tier.downgraded', {
       roomId: room.id, deliberationId: deliberation.id, agentId: agent.id,
-      payload: { requested, granted: tier, reason: 'no working directory set for this project' },
+      // The reason comes from resolveWorkspace now. Hardcoding it here made the
+      // log say "none set" for a directory that was set and then deleted.
+      payload: { requested, granted: tier, reason: workspace.reason },
     })
   }
 
@@ -462,9 +465,20 @@ function validReplyTo(id: string | null | undefined, history: Message[]): string
 }
 
 const RANK = { reasoning: 0, research: 1, workstation: 2, full: 3 } as const
+
+/**
+ * Rank a tier, treating anything unrecognised as the most restrictive one.
+ *
+ * `RANK[garbage]` is `undefined`, and every comparison against it is false — so
+ * `lowerTier` returned the ceiling unchanged and `resolveWorkspace` skipped its
+ * downgrade. A stored tier of `"workstation "` (trailing space) therefore reached
+ * the adapters intact.
+ */
+const rank = (t: string): number => (isTier(t) ? RANK[t] : 0)
+
 /** A room can never grant an agent more than its own ceiling (plan §9). */
 function lowerTier(a: Room['tier'], b: Agent['tierCeiling']) {
-  return RANK[a] <= RANK[b] ? a : b
+  return rank(a) <= rank(b) ? a : b
 }
 
 /**
@@ -478,11 +492,27 @@ function lowerTier(a: Room['tier'], b: Agent['tierCeiling']) {
  * machine. So a room asking for file access with no working directory set is
  * downgraded to `research` rather than quietly given more than it asked for.
  */
-function resolveWorkspace(room: Room, tier: Tier): { tier: Tier; workingDir: string | null; downgraded: boolean } {
-  if (RANK[tier] < RANK['workstation']) return { tier, workingDir: null, downgraded: false }
+function resolveWorkspace(room: Room, tier: Tier):
+    { tier: Tier; workingDir: string | null; downgraded: boolean; reason?: string } {
+  if (rank(tier) < rank('workstation')) return { tier, workingDir: null, downgraded: false }
   const dir = db.getProject(room.projectId)?.workingDir ?? null
-  if (!dir) return { tier: 'research', workingDir: null, downgraded: true }
+  if (!dir) {
+    return { tier: 'research', workingDir: null, downgraded: true,
+             reason: 'no working directory set for this project' }
+  }
+  // Checked per turn, not once per run, so a directory deleted mid-deliberation
+  // is caught. One statSync against a turn that takes minutes is free, and
+  // handing a CLI `--add-dir` for a path that is gone is how an agent ends up
+  // running wherever the daemon happens to be.
+  if (!isDirectory(dir)) {
+    return { tier: 'research', workingDir: null, downgraded: true,
+             reason: `the working directory no longer exists: ${dir}` }
+  }
   return { tier, workingDir: dir, downgraded: false }
+}
+
+const isDirectory = (p: string): boolean => {
+  try { return statSync(p).isDirectory() } catch { return false }
 }
 
 /** Exposed for tests: the scoping decision is the safety-critical part. */

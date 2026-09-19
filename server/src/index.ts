@@ -6,6 +6,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { WebSocketServer } from 'ws'
 import { makeApi } from './api.ts'
+import { requestAllowed, warnRefused } from './http/origin.ts'
 import { bus } from './bus.ts'
 import { seedIfEmpty } from './seed.ts'
 import { probeBrains } from './adapters/registry.ts'
@@ -83,7 +84,24 @@ function findWebRoot(): string | null {
 }
 
 const server = createServer(app)
-const wss = new WebSocketServer({ server, path: '/ws' })
+/**
+ * The same origin rule as the API.
+ *
+ * WebSocket handshakes are exempt from CORS, and every socket here is subscribed
+ * to the whole event bus — so before this, any web page could open
+ * `ws://127.0.0.1:8787/ws` and stream every message body live without ever
+ * touching `/api`. Fixing the CORS header and leaving this open fixes nothing.
+ */
+const wss = new WebSocketServer({
+  server, path: '/ws',
+  // `req.headers.origin`, not `info.origin`: ws normalises absent to '' in some
+  // versions, and '' must read as "no browser", not as an unparseable origin.
+  verifyClient: ({ req }, done) => {
+    const ok = requestAllowed(req.headers.origin, req.headers.host)
+    if (!ok) warnRefused(req.headers.origin, req.headers.host)
+    done(ok, 403, 'refused: unrecognised Origin or Host')
+  },
+})
 // It shares the http server, so it re-emits that server's listen failure. Left
 // unhandled, an EADDRINUSE killed the daemon with a raw stack trace from ws
 // before the readable message below could be printed.
