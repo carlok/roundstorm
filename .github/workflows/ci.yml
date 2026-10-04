@@ -24,7 +24,7 @@ jobs:
         # engines and MIN_NODE in src-tauri/src/main.rs.
         node: ['22.16.0', '22']
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
@@ -39,7 +39,7 @@ jobs:
   ui:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: 22
