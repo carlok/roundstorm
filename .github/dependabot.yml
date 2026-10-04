@@ -17,6 +17,22 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "@tauri-apps/*"
         update-types: ["version-update:semver-minor"]
+      # Major upgrades of the UI toolchain. Each is a migration with its own
+      # breaking changes (React 18 -> 19, Vite 6 -> 8 and the plugin that tracks
+      # it), taken on purpose with the UI sweep and a render check, not as a
+      # weekly PR. Minor and patch releases of all four still flow.
+      - dependency-name: "react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react-dom"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/react-dom"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "vite"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@vitejs/plugin-react"
+        update-types: ["version-update:semver-major"]
 
   # The Tauri shell. Slower-moving and heavier to verify (it needs a release
   # build and a launch), so monthly.
