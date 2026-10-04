@@ -46,7 +46,14 @@ function parseArgs(argv: string[]): Options | null {
 
 async function main(): Promise<number> {
   const opts = parseArgs(process.argv)
-  if (!opts) { process.stdout.write(USAGE); return process.argv.length > 2 ? 1 : 0 }
+  if (!opts) {
+    process.stdout.write(USAGE)
+    // Asking for help is not a usage error. `--help` used to exit 1 because it
+    // had an argument, so `roundstorm --help && …` stopped and CI treated it as
+    // a failure. A genuinely bad invocation still exits 1.
+    const asked = process.argv.slice(2).some(a => a === '--help' || a === '-h')
+    return asked || process.argv.length <= 2 ? 0 : 1
+  }
 
   const path = resolve(opts.file)
   let text: string

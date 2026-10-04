@@ -20,6 +20,21 @@ in the app: **Manual** in the room header, or `shift-?`.
 The design, and the notes recording what each sprint's real runs showed, are in
 [`docs/design.md`](docs/design.md).
 
+## Before you start
+
+- **You need at least one brain installed and signed in:** `claude`, `codex`,
+  `agy` or `cursor-agent`. Roundstorm ships no models and no keys; it drives those
+  command-line tools, so every turn is billed to whichever account that tool uses.
+- **A deliberation is many model calls.** Agents times rounds, run in parallel, plus
+  a synthesis at the end: four agents over three rounds is a dozen turns. Start with
+  small models, or a local brain, and read the cost note in the
+  [Manual](docs/manual.md).
+- **Where your text goes.** Everything is stored in one local SQLite file in your
+  user data directory. Roundstorm has no telemetry and makes no network calls of
+  its own beyond endpoints you configure (a local embedding server, a local model
+  server, DeepSeek if you set a key). What you type goes to the providers behind
+  the brains you picked, exactly as if you had typed it into their tool.
+
 ## Status
 
 | Sprint | Scope | State |
