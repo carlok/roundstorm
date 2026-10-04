@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (${{ matrix.os }}, node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # One failing cell should not hide the others: the point of the matrix is
+      # to see *which* combinations work.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        # 22.13.0 is the floor: node:sqlite lost its --experimental-sqlite flag
+        # there (22.12.0 throws "No such built-in module"). Keep it in step with
+        # package.json engines and MIN_NODE in src-tauri/src/main.rs.
+        node: ['22.13.0', '22']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+  # The browser sweep: asks headless Chrome what a click on each control would
+  # actually hit. macOS only, because it drives the built bundle with Meta+K and
+  # the runner ships Chrome at the path the test defaults to.
+  ui:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run test:ui

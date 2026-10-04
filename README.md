@@ -1,5 +1,7 @@
 # Roundstorm
 
+[![CI](https://github.com/carlok/roundstorm/actions/workflows/ci.yml/badge.svg)](https://github.com/carlok/roundstorm/actions/workflows/ci.yml)
+
 A local-first app where persistent, heterogeneous AI researchers deliberate for N
 rounds on a hard question — with as little orchestration effort from you as an
 ordinary group chat.
@@ -32,7 +34,7 @@ The design, and the notes recording what each sprint's real runs showed, are in
 | 7 | Memory inbox, sources, activity log, global search, side rooms | done |
 | 8 | Tauri app, persona lab, local brains, semantic search | done |
 
-**The MVP is complete and packaged.**
+**All nine sprints are done and the app is packaged.** What it does not do is listed under [Security](#security) — read that before raising a capability tier.
 
 Working today: rooms and DMs, nine persona templates, sealed opening rounds,
 parallel and ping-pong scheduling, live per-agent activity, mid-flight extend and
@@ -60,7 +62,7 @@ node dist-server/index.mjs      # then open http://127.0.0.1:8787
 ```
 
 The daemon serves the interface itself, so that one command is the whole product
-— on macOS, Linux or Windows, with nothing but Node 22.5+. No Rust toolchain, no
+— on macOS, Linux or Windows, with nothing but Node 22.13+. No Rust toolchain, no
 WebKitGTK, no WebView2, nothing to sign.
 
 For development with hot reload:
@@ -139,14 +141,17 @@ launch requires right-click → Open. The bundle has no native dependencies —
 storage is Node's built-in `node:sqlite`.
 
 ```bash
-npm test          # 158 tests
+npm test
 npm run coverage  # the same, with a coverage report
 npm run typecheck
 npm run test:ui   # the browser sweep; needs a build and a Chrome
 ```
 
-Coverage sits around **77% of lines, 85% of branches** overall, and that average
-is not the interesting number. The split is deliberate:
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the three rules a change can break without noticing.
+
+Run `npm run coverage` for current numbers; none are quoted here because a figure
+in a README is stale the next time anyone touches a test. The overall average is
+not the interesting number anyway. The split is deliberate:
 
 | Area | Lines | Why |
 |---|---|---|
@@ -247,7 +252,7 @@ the brains.
 Node's built-in SQLite, reached through a small adapter in `server/src/sqlite/`.
 
 **The daemon has no native dependency.** It bundles to a single 1.4 MB
-JavaScript file that runs anywhere Node 22.5+ does, which is what makes a
+JavaScript file that runs anywhere Node 22.13+ does, which is what makes a
 multi-platform build tractable — the only per-platform artifact left is the Tauri
 shell itself, and Rust cross-compiles.
 

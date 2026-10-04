@@ -96,10 +96,10 @@ test('a normal prompt passes on every platform', () => {
 // --- where to look ---
 
 test('Windows search covers npm globals and the version managers', () => {
-  const dirs = searchDirs('win32', 'C:\\Users\\carlo', {
+  const dirs = searchDirs('win32', 'C:\\Users\\alice', {
     PATH: 'C:\\Windows\\System32',
-    APPDATA: 'C:\\Users\\carlo\\AppData\\Roaming',
-    LOCALAPPDATA: 'C:\\Users\\carlo\\AppData\\Local',
+    APPDATA: 'C:\\Users\\alice\\AppData\\Roaming',
+    LOCALAPPDATA: 'C:\\Users\\alice\\AppData\\Local',
   })
   assert.ok(dirs.some(d => d.endsWith('Roaming\\npm')), 'npm global shims not searched')
   assert.ok(dirs.some(d => d.includes('WindowsApps')))
@@ -114,7 +114,7 @@ test('Windows reads Path when PATH is absent', () => {
 })
 
 test('unix search keeps the locations these CLIs actually install to', () => {
-  const dirs = searchDirs('linux', '/home/carlo', { PATH: '/usr/bin' })
+  const dirs = searchDirs('linux', '/home/alice', { PATH: '/usr/bin' })
   assert.ok(dirs.some(d => d.endsWith('/.local/bin')), 'agy, codex and cursor-agent live here')
   assert.ok(dirs.includes('/usr/bin'))
 })

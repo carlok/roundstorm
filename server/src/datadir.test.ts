@@ -21,25 +21,25 @@ const { defaultDataDirFor } = await import('./db.ts')
 
 test('macOS uses Application Support', () => {
   assert.equal(
-    defaultDataDirFor('darwin', '/Users/carlo'),
-    '/Users/carlo/Library/Application Support/Roundstorm')
+    defaultDataDirFor('darwin', '/Users/alice'),
+    '/Users/alice/Library/Application Support/Roundstorm')
 })
 
 test('Linux follows XDG, and honours XDG_DATA_HOME when set', () => {
   assert.equal(
-    defaultDataDirFor('linux', '/home/carlo'),
-    '/home/carlo/.local/share/roundstorm')
+    defaultDataDirFor('linux', '/home/alice'),
+    '/home/alice/.local/share/roundstorm')
   assert.equal(
-    defaultDataDirFor('linux', '/home/carlo', { XDG_DATA_HOME: '/data/xdg' }),
+    defaultDataDirFor('linux', '/home/alice', { XDG_DATA_HOME: '/data/xdg' }),
     '/data/xdg/roundstorm')
 })
 
 test('Windows uses APPDATA, with a sane fallback if it is unset', () => {
   assert.match(
-    defaultDataDirFor('win32', 'C:\\Users\\carlo', { APPDATA: 'C:\\Users\\carlo\\AppData\\Roaming' }),
+    defaultDataDirFor('win32', 'C:\\Users\\alice', { APPDATA: 'C:\\Users\\alice\\AppData\\Roaming' }),
     /AppData[\\/]Roaming[\\/]Roundstorm$/)
   assert.match(
-    defaultDataDirFor('win32', 'C:\\Users\\carlo'),
+    defaultDataDirFor('win32', 'C:\\Users\\alice'),
     /AppData[\\/]Roaming[\\/]Roundstorm$/)
 })
 

@@ -110,8 +110,9 @@ fn spawn_daemon(
     let node = which_node().ok_or_else(|| {
         std::io::Error::new(
             std::io::ErrorKind::NotFound,
-            format!("No Node {MIN_NODE_MAJOR}+ found. Roundstorm needs Node {MIN_NODE_MAJOR} or newer; \
-                     set ROUNDSTORM_NODE to point at one."),
+            format!("No Node {}.{}+ found. Roundstorm needs Node {}.{} or newer; \
+                     set ROUNDSTORM_NODE to point at one.",
+                    MIN_NODE.0, MIN_NODE.1, MIN_NODE.0, MIN_NODE.1),
         )
     })?;
 
@@ -133,13 +134,15 @@ fn spawn_daemon(
         .spawn()
 }
 
-/// Minimum Node that can run the daemon.
+/// Minimum Node that can run the daemon, as (major, minor).
 ///
-/// 22 because storage is `node:sqlite`, which landed in 22.5 — an older Node
-/// parses the bundle fine and then dies on the import, which is a much more
-/// confusing failure than "no suitable Node found". This has to stay in step with
-/// the `engines` field in package.json.
-const MIN_NODE_MAJOR: u32 = 22;
+/// 22.13, not 22: storage is `node:sqlite`, which landed in 22.5 behind
+/// `--experimental-sqlite` and only lost the flag in 22.13. Checked directly —
+/// `require('node:sqlite')` on 22.12.0 throws "No such built-in module", on 22.13.0
+/// it works. An older Node parses the bundle fine and then dies on the import,
+/// which is a much more confusing failure than "no suitable Node found". This has
+/// to stay in step with the `engines` field in package.json.
+const MIN_NODE: (u32, u32) = (22, 13);
 
 /// Find a Node that can actually run the daemon.
 ///
@@ -158,11 +161,11 @@ fn which_node() -> Option<std::path::PathBuf> {
         }
     }
 
-    let mut best: Option<(u32, std::path::PathBuf)> = None;
+    let mut best: Option<((u32, u32), std::path::PathBuf)> = None;
     for candidate in node_candidates() {
-        if let Some(major) = node_major(&candidate) {
-            if major >= MIN_NODE_MAJOR && best.as_ref().is_none_or(|(m, _)| major > *m) {
-                best = Some((major, candidate));
+        if let Some(version) = node_version(&candidate) {
+            if version >= MIN_NODE && best.as_ref().is_none_or(|(v, _)| version > *v) {
+                best = Some((version, candidate));
             }
         }
     }
@@ -197,17 +200,15 @@ fn node_candidates() -> Vec<std::path::PathBuf> {
     out
 }
 
-/// Ask a Node binary for its major version. `None` if it will not answer.
-fn node_major(path: &std::path::Path) -> Option<u32> {
+/// Ask a Node binary for its (major, minor). `None` if it will not answer.
+fn node_version(path: &std::path::Path) -> Option<(u32, u32)> {
     let out = Command::new(path).arg("--version").output().ok()?;
     if !out.status.success() {
         return None;
     }
     let text = String::from_utf8_lossy(&out.stdout);
-    text.trim()
-        .trim_start_matches('v')
-        .split('.')
-        .next()?
-        .parse()
-        .ok()
+    let mut parts = text.trim().trim_start_matches('v').split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    Some((major, minor))
 }
