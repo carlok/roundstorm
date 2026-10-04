@@ -51,6 +51,15 @@ value quietly granting an agent more than it should.
 - **Agent output is not trusted content.** It is rendered as Markdown with HTML
   escaped, but it comes from models that read the web.
 
+## Known advisories
+
+- **`glib` < 0.20 (GHSA-wrw7-89jp-8q8g), moderate.** Reached only through Tauri's
+  Linux (GTK) backend. It is not in the macOS dependency graph
+  (`cargo tree --target aarch64-apple-darwin -i glib` finds nothing), so the macOS
+  app does not contain it, and this project does not build or ship a Linux desktop
+  app. Dismissed on that basis; the fix is Tauri moving off gtk-rs 0.18 and will be
+  looked at with the Tauri 2.12 upgrade.
+
 ## Scope
 
 In scope: anything that lets a website or a remote host reach the API, escalate a
