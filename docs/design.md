@@ -1142,6 +1142,10 @@ from async route handlers — there are seven — and there were no process-leve
 handlers. Both are fixed, and `dm.ts` gained the turn deadline the scheduler
 already had, so a hung DM no longer leaves an agent on "Thinking" forever.
 
+*Later:* the daemon moved to Express 5, which forwards a rejected async handler to
+the error middleware itself, so the per-route wrapper described above is gone. The
+process-level handlers stay, for the work that is not a route.
+
 **Adapter fixes**, each the difference between a turn that failed and one that
 looks fine: multi-block Claude prose was truncated to its last block (`=` not
 `+=`); an error arriving alongside any text was discarded outright, so a hard

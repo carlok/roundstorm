@@ -53,17 +53,8 @@ export function makeApi() {
 
   api.use(express.json({ limit: '8mb' }))
 
-/**
- * Express 4 does not forward a rejected promise from an async handler — it is
- * simply dropped, and Node then treats it as an unhandled rejection. Every async
- * route below therefore has to hand its failure to `next` by hand.
- */
-const wrap = (fn: (req: express.Request, res: express.Response) => Promise<unknown>) =>
-  (req: express.Request, res: express.Response, next: express.NextFunction) => {
-    void Promise.resolve(fn(req, res)).catch(next)
-  }
 
-  api.get('/bootstrap', wrap(async (_req, res) => {
+  api.get('/bootstrap', async (_req, res) => {
     res.json({
       projects: db.listProjects(),
       rooms: db.listRooms(),
@@ -75,7 +66,7 @@ const wrap = (fn: (req: express.Request, res: express.Response) => Promise<unkno
         key: m, label: MODE_LABEL[m], blurb: MODE_BLURB[m],
       })),
     })
-  }))
+  })
 
   api.get('/rooms/:id/messages', (req, res) => {
     const room = db.getRoom(req.params.id)
@@ -122,22 +113,22 @@ const wrap = (fn: (req: express.Request, res: express.Response) => Promise<unkno
    * running. `semantic: null` means "not available", which the UI reports rather
    * than silently returning keyword hits and pretending they are the same thing.
    */
-  api.get('/search', wrap(async (req, res) => {
+  api.get('/search', async (req, res) => {
     const q = typeof req.query.q === 'string' ? req.query.q : ''
     const [keyword, semantic] = await Promise.all([
       Promise.resolve(db.searchMessages(q)),
       req.query.semantic === '0' ? Promise.resolve(null) : semanticSearch(q),
     ])
     res.json({ hits: keyword, semantic })
-  }))
+  })
 
-  api.get('/search/status', wrap(async (_req, res) => res.json(await embedderStatus())))
+  api.get('/search/status', async (_req, res) => res.json(await embedderStatus()))
 
-  api.post('/search/index', wrap(async (_req, res) => {
+  api.post('/search/index', async (_req, res) => {
     const r = await indexPending()
     db.logEvent('search.indexed', { payload: r })
     res.json({ ...r, status: await embedderStatus() })
-  }))
+  })
 
   // Persona lab (plan §5.1): same personas, different brains, side by side.
   api.post('/lab/experiments', (req, res) => {
@@ -204,7 +195,7 @@ const wrap = (fn: (req: express.Request, res: express.Response) => Promise<unkno
    * can navigate the app's own window away from the UI. Saving server-side works
    * identically in the app, in a browser and from curl, and needs no save dialog.
    */
-  api.post('/backup', wrap(async (req, res) => {
+  api.post('/backup', async (req, res) => {
     // Deliberately not caller-supplied. This used to take `req.body.dir` and
     // mkdirSync it recursively, so any page that could reach the API could create
     // directory trees anywhere the daemon's user can write. No caller ever sent
@@ -222,9 +213,9 @@ const wrap = (fn: (req: express.Request, res: express.Response) => Promise<unkno
     } catch (err) {
       res.status(500).json({ error: `backup failed: ${String(err)}` })
     }
-  }))
+  })
 
-  api.get('/backup', wrap(async (_req, res) => {
+  api.get('/backup', async (_req, res) => {
     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
     const name = `roundstorm-${stamp}.db`
     const tmp = join(tmpdir(), `${randomUUID()}.db`)
@@ -240,7 +231,7 @@ const wrap = (fn: (req: express.Request, res: express.Response) => Promise<unkno
       rmSync(tmp, { force: true })
       res.status(500).json({ error: `backup failed: ${String(err)}` })
     }
-  }))
+  })
 
   // Activity log as JSONL — the auditable stream, separate from the transcript.
   api.get('/events/export', (req, res) => {
@@ -356,7 +347,7 @@ const wrap = (fn: (req: express.Request, res: express.Response) => Promise<unkno
     res.json({ ok: true })
   })
 
-  api.post('/rooms/:id/messages', wrap(async (req, res) => {
+  api.post('/rooms/:id/messages', async (req, res) => {
     const room = db.getRoom(req.params.id)
     if (!room) return res.status(404).json({ error: 'no such room' })
     const { body, replyTo = null } = req.body ?? {}
@@ -378,7 +369,7 @@ const wrap = (fn: (req: express.Request, res: express.Response) => Promise<unkno
       void replyInDm(room, message)
     }
     res.json(message)
-  }))
+  })
 
   /**
    * Load an experiment file from the interface.

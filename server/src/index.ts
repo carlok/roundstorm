@@ -174,10 +174,12 @@ for (const sig of ['SIGINT', 'SIGTERM'] as const) {
 /**
  * A rejected promise must not take the daemon with it.
  *
- * Express 4 does not forward rejections from async route handlers, and there are
- * several — so before this, one bad search query killed a daemon that was in the
- * middle of a paid deliberation. Log it and keep going; a genuinely broken
- * process will fail its next request loudly enough.
+ * Express 5 forwards a rejected async route handler to the error middleware, so
+ * routes no longer need this. It stays because nothing else is guaranteed to be
+ * awaited: the fire-and-forget DM reply, the background embedding index, a
+ * deliberation's own bookkeeping. Before it existed, one stray rejection killed a
+ * daemon that was in the middle of a paid deliberation. Log it and keep going; a
+ * genuinely broken process will fail its next request loudly enough.
  */
 process.on('unhandledRejection', reason => {
   console.error('unhandled rejection:', reason)

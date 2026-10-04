@@ -23,7 +23,7 @@ let origin: string
 before(async () => {
   const app = express()
   app.use('/api', makeApi())
-  await new Promise<void>(r => { server = app.listen(0, '127.0.0.1', r) })
+  await new Promise<void>(r => { server = app.listen(0, '127.0.0.1', () => r()) })
   origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`
 })
 
@@ -154,4 +154,28 @@ test('a working directory is stored resolved, not as given', async () => {
   assert.equal(res.status, 200)
   const stored = db.getProject(p.id)!.workingDir!
   assert.ok(stored.startsWith('/'), `stored as ${stored}`)
+})
+
+// --- the framework behaviour this file's routes now rely on ---
+
+test('a rejected async handler becomes a 500 instead of hanging the request', async () => {
+  // Express 4 dropped a rejected promise on the floor: the request never answered
+  // and Node saw an unhandled rejection, which is why every async route used to be
+  // wrapped by hand. Express 5 forwards it to the error middleware itself, and the
+  // wrapper is gone — so this is what stops a downgrade or a mis-pinned version
+  // from quietly reintroducing the hang. Hence the timeout: on 4 this never ends.
+  const app = express()
+  app.get('/boom', async () => { throw new Error('boom') })
+  app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    res.status(500).json({ error: err.message })
+  })
+  const srv = await new Promise<Server>(r => { const s = app.listen(0, '127.0.0.1', () => r(s)) })
+  try {
+    const port = (srv.address() as { port: number }).port
+    const res = await fetch(`http://127.0.0.1:${port}/boom`, { signal: AbortSignal.timeout(2000) })
+    assert.equal(res.status, 500)
+    assert.equal((await res.json()).error, 'boom')
+  } finally {
+    srv.close()
+  }
 })
