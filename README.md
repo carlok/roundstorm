@@ -151,9 +151,23 @@ every turn while a terminal launch works perfectly. `adapters/resolve.ts` probes
 the real install locations and the spawned brains get an enriched `PATH` of their
 own, because they shell out too.
 
-Not signed or notarised: that needs an Apple Developer certificate, so the first
-launch requires right-click → Open. The bundle has no native dependencies —
-storage is Node's built-in `node:sqlite`.
+**The app does not bundle Node.** It bundles the daemon and runs it with a Node you
+already have, so you need **Node 22.16 or newer** installed. It looks in the usual
+places (Homebrew, nvm, Volta, fnm, `/usr/local/bin`) and takes the newest one that
+is new enough; set `ROUNDSTORM_NODE` to point at a specific binary. With none
+found, the window stays empty and the reason is in
+`~/Library/Logs/dev.roundstorm.app/roundstorm-daemon.log`.
+
+Not notarised: that needs an Apple Developer certificate, so the app carries only
+an ad-hoc signature and macOS will not open a downloaded copy on a plain
+double-click. Right-click → Open, or System Settings → Privacy & Security → Open
+Anyway. If it still refuses, remove the quarantine flag the download added:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Roundstorm.app
+```
+
+The bundle has no native dependencies — storage is Node's built-in `node:sqlite`.
 
 ```bash
 npm test
