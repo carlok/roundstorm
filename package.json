@@ -45,7 +45,7 @@
     "@types/react": "^18.3.17",
     "@types/react-dom": "^18.3.5",
     "@types/ws": "^8.5.13",
-    "@vitejs/plugin-react": "^4.3.4",
+    "@vitejs/plugin-react": "^6.1.1",
     "concurrently": "^9.1.0",
     "esbuild": "^0.28.2",
     "puppeteer-core": "^25.9.0",
