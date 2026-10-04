@@ -12,8 +12,10 @@ npm test            # unit and integration; no brain, no network, no spend
 npm run test:ui     # builds the bundle and drives headless Chrome over it
 ```
 
-Node **22.13 or newer**. `node:sqlite` is the only storage and it needs that
-version; 22.12 throws `No such built-in module`.
+Node **22.16 or newer**. `node:sqlite` is the only storage. It exists from 22.5,
+needs no flag from 22.13, and gains the `backup()` function the backup route uses
+in 22.16 — each step was measured, not assumed: 22.12 throws `No such built-in
+module`, 22.15 loads but has no `backup`.
 
 `npm test` skips four ledger tests unless an embedding server is running at
 `127.0.0.1:1234` (LM Studio with a nomic-embed model). They cover position

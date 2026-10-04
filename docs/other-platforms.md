@@ -36,7 +36,7 @@ npm run build
 node dist-server/index.mjs        # then open http://127.0.0.1:8787
 ```
 
-Needs **Node 22.13 or newer** — storage is `node:sqlite`, which landed in 22.5 but stayed behind `--experimental-sqlite` until 22.13.
+Needs **Node 22.16 or newer** — storage is `node:sqlite`, which landed in 22.5, lost its `--experimental-sqlite` flag in 22.13, and only gained the `backup()` function this app's backup button uses in 22.16.
 Nothing else: no Rust, no WebKitGTK, no WebView2. The desktop shell is macOS-only
 and is not involved.
 
@@ -51,7 +51,7 @@ that rather than running the rest.
 
 | # | Check | What a failure means |
 |---|---|---|
-| 1 | `node --version` is ≥ 22.13 | Nothing else will work. |
+| 1 | `node --version` is ≥ 22.16 | Nothing else will work. |
 | 2 | Daemon prints `storage node:sqlite` | Storage opened; the data directory is writable. |
 | 3 | The banner's `data` path looks native | Linux: `~/.local/share/roundstorm`. Windows: `%APPDATA%\Roundstorm`. A `Library/Application Support` here is a bug. |
 | 4 | `brains` line shows a ✔ | Binary resolution works. **This is the most likely Windows failure** — a ✖ for a brain that is installed means `PATHEXT` or the search directories are wrong. |

@@ -18,10 +18,11 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        # 22.13.0 is the floor: node:sqlite lost its --experimental-sqlite flag
-        # there (22.12.0 throws "No such built-in module"). Keep it in step with
-        # package.json engines and MIN_NODE in src-tauri/src/main.rs.
-        node: ['22.13.0', '22']
+        # 22.16.0 is the floor: sqlite/node.ts imports backup() from node:sqlite,
+        # which 22.13-22.15 lack (and 22.12 has no node:sqlite at all). A first
+        # guess of 22.13 failed exactly here. Keep it in step with package.json
+        # engines and MIN_NODE in src-tauri/src/main.rs.
+        node: ['22.16.0', '22']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

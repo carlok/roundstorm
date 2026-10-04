@@ -136,13 +136,13 @@ fn spawn_daemon(
 
 /// Minimum Node that can run the daemon, as (major, minor).
 ///
-/// 22.13, not 22: storage is `node:sqlite`, which landed in 22.5 behind
-/// `--experimental-sqlite` and only lost the flag in 22.13. Checked directly —
-/// `require('node:sqlite')` on 22.12.0 throws "No such built-in module", on 22.13.0
-/// it works. An older Node parses the bundle fine and then dies on the import,
-/// which is a much more confusing failure than "no suitable Node found". This has
-/// to stay in step with the `engines` field in package.json.
-const MIN_NODE: (u32, u32) = (22, 13);
+/// 22.16, and each step below was measured rather than remembered: `node:sqlite`
+/// does not exist in 22.12 ("No such built-in module"); it loads from 22.13 but
+/// without the standalone `backup()` that `sqlite/node.ts` imports, so 22.13
+/// through 22.15 parse the bundle and then die on the import; 22.16.0 is the first
+/// with all of it. An older Node failing late and confusingly is much worse than
+/// "no suitable Node found". Keep in step with `engines` in package.json.
+const MIN_NODE: (u32, u32) = (22, 16);
 
 /// Find a Node that can actually run the daemon.
 ///

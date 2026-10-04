@@ -62,7 +62,7 @@ node dist-server/index.mjs      # then open http://127.0.0.1:8787
 ```
 
 The daemon serves the interface itself, so that one command is the whole product
-— on macOS, Linux or Windows, with nothing but Node 22.13+. No Rust toolchain, no
+— on macOS, Linux or Windows, with nothing but Node 22.16+. No Rust toolchain, no
 WebKitGTK, no WebView2, nothing to sign.
 
 For development with hot reload:
@@ -252,7 +252,7 @@ the brains.
 Node's built-in SQLite, reached through a small adapter in `server/src/sqlite/`.
 
 **The daemon has no native dependency.** It bundles to a single 1.4 MB
-JavaScript file that runs anywhere Node 22.13+ does, which is what makes a
+JavaScript file that runs anywhere Node 22.16+ does, which is what makes a
 multi-platform build tractable — the only per-platform artifact left is the Tauri
 shell itself, and Rust cross-compiles.
 
