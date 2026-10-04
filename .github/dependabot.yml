@@ -9,6 +9,12 @@ updates:
     groups:
       minor-and-patch:
         update-types: [minor, patch]
+    ignore:
+      # Types should match the oldest Node this supports (engines: >=22.16), not
+      # the newest. @types/node 26 would let the code call APIs that do not exist
+      # on the floor, and CI's typecheck would pass while a user's Node 22 broke.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
 
   # The Tauri shell. Slower-moving and heavier to verify (it needs a release
   # build and a launch), so monthly.
