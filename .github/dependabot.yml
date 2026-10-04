@@ -15,6 +15,8 @@ updates:
       # on the floor, and CI's typecheck would pass while a user's Node 22 broke.
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
+      - dependency-name: "@tauri-apps/*"
+        update-types: ["version-update:semver-minor"]
 
   # The Tauri shell. Slower-moving and heavier to verify (it needs a release
   # build and a launch), so monthly.
@@ -22,6 +24,14 @@ updates:
     directory: /src-tauri
     schedule: { interval: monthly }
     open-pull-requests-limit: 3
+    ignore:
+      # tauri-build and tauri-plugin-shell each require the matching tauri minor,
+      # so a "small" bump of one is really the whole Tauri upgrade (tao, the
+      # runtime, ~50 crates) and needs a release build and a launch to trust.
+      # Patch releases still flow; minors are taken on purpose, together with the
+      # npm @tauri-apps/cli so the CLI and the crate never disagree.
+      - dependency-name: "tauri*"
+        update-types: ["version-update:semver-minor"]
 
   - package-ecosystem: github-actions
     directory: /
