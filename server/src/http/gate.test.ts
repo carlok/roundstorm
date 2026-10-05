@@ -44,7 +44,7 @@ before(async () => {
 after(() => { server?.close() })
 
 const get = (origin?: string) =>
-  fetch(`http://127.0.0.1:${port}/api/bootstrap`, origin ? { headers: { origin } } : undefined)
+  fetch(`http://127.0.0.1:${port}/api/memory`, origin ? { headers: { origin } } : undefined)
 
 test('a website cannot read the API, and is not told it may', async () => {
   const res = await get('https://evil.example')
