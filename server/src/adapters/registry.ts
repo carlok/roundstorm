@@ -11,6 +11,9 @@ const ADAPTERS: BrainAdapter[] = [
   deepseekAdapter, lmStudioAdapter, ollamaAdapter,
 ]
 
+/** Every brain id this build knows, installed or not. For validating a config. */
+export const adapterIds = (): string[] => ADAPTERS.map(a => a.id)
+
 export const getAdapter = (id: string): BrainAdapter | undefined =>
   ADAPTERS.find(a => a.id === id)
 

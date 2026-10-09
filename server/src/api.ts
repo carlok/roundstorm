@@ -8,7 +8,7 @@ import { bus } from './bus.ts'
 import { requestAllowed, warnRefused } from './http/origin.ts'
 import { ALL_PERSONAS } from './deliberation/personas.ts'
 import { MODE_BLURB, MODE_LABEL } from './deliberation/context.ts'
-import { listBrainOptions, probeBrains } from './adapters/registry.ts'
+import { adapterIds, listBrainOptions, probeBrains } from './adapters/registry.ts'
 import { extendDeliberation, interruptDeliberation, startDeliberation, stopDeliberation } from './deliberation/scheduler.ts'
 import { summarise } from './deliberation/ledger.ts'
 import { renderResultMarkdown } from './deliberation/export.ts'
@@ -384,7 +384,7 @@ export function makeApi() {
 
     let cfg
     try {
-      cfg = parseExperiment(text)
+      cfg = parseExperiment(text, { brains: adapterIds(), personas: ALL_PERSONAS.map(p => p.key) })
     } catch (err) {
       // A parse failure is the user's to fix; hand back the message naming the
       // field rather than a generic 400.

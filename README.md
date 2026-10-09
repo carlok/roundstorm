@@ -337,12 +337,22 @@ cast and the room and stops — starting a run costs money, so pressing
 | `--quiet` | No progress on stderr |
 
 Exit codes: `0` concluded · `2` no reliable conclusion, or a conclave that failed
-to converge · `3` the run itself broke · `1` bad usage or invalid config.
-"Two competing positions remain" is a real answer and exits `0`.
+to converge · `3` the run itself broke (including a run in which nobody spoke) ·
+`1` bad usage or invalid config · `130` interrupted with Ctrl-C, which also stops
+the running deliberation and the brain processes. "Two competing positions remain"
+is a real answer and exits `0`.
+
+**A config is checked strictly, because it is meant to describe an experiment
+exactly.** An unknown key is an error, with a suggestion (`"round"` → did you mean
+`"rounds"`?); a value of the wrong type is an error (`"sealedOpening": "false"` is
+not `true`); and a `brain` or `persona` that does not exist is an error that lists
+the ones that do. Use `--dry-run` to check a file without running it. In a batch
+(`.jsonl`), an experiment that fails does not discard the ones that finished.
 
 Everything it creates lands in the same store the app reads, so a headless run is
 browsable afterwards rather than being a separate world. Re-running the same file
-reuses its agents and room instead of accumulating copies.
+reuses its agents and room instead of accumulating copies, and says so when a
+reused agent changes brain or persona (agent names are shared across the whole store).
 
 ## Driving it over HTTP
 

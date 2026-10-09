@@ -119,3 +119,37 @@ test('the two signals are unioned, not double-counted', () => {
   })
   assert.equal(reportArm(r.id)!.mindChanges, 1)
 })
+
+// --- one arm, run twice ---
+
+test('re-running an arm reports the latest run, not the two fused together', () => {
+  // `level` and `positions` were scoped to the room's latest run while the turn
+  // count, stance mix, cost and conclusion were room-wide, so one report mixed two
+  // experiments: a concession in run 1 counted in run 2's numbers, and a run that
+  // produced no card quietly reported the previous run's conclusion.
+  const { r, cast } = room('twice')
+  const run = (q: string) => db.createDeliberation({
+    roomId: r.id, mode: 'deliberation', rounds: 1, style: 'parallel', sealedOpening: false,
+    status: 'complete', currentRound: 1, question: q, tier: 'research',
+  } as never)
+  const first = run('first'), second = run('second')
+
+  const say = (deliberationId: string, stance: string, costUsd: number) => db.insertMessage({
+    roomId: r.id, authorType: 'agent', authorId: cast[0].id, body: 'a few words here',
+    round: 1, deliberationId, stance: stance as never, costUsd,
+  })
+  say(first.id, 'concede', 1.0); say(first.id, 'concede', 1.0); say(first.id, 'concede', 1.0)
+  say(second.id, 'assert', 0.5)
+
+  db.saveResult({
+    id: 'old-card', deliberationId: first.id, roomId: r.id, level: 'strong_consensus',
+    createdAt: Date.now(), conclusion: 'THE FIRST RUN CONCLUSION', why: '', commonGround: [],
+    disagreement: [], alternatives: [], evidence: [], unknowns: [], nextSteps: [],
+  } as never)
+
+  const rep = reportArm(r.id)!
+  assert.equal(rep.turns, 1, 'the earlier run\'s turns were counted')
+  assert.equal(rep.concessions, 0, 'the earlier run\'s concessions were counted')
+  assert.equal(rep.costUsd, 0.5, 'the earlier run\'s cost was counted')
+  assert.equal(rep.conclusion, '', 'the latest run produced no card, so no conclusion is claimed')
+})

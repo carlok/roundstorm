@@ -8,10 +8,14 @@
  * code the app runs, driven from a file. It replaces scripts/ask.sh, which
  * needed bash, curl and jq and therefore did not run on Windows at all.
  */
-import { readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { extname, resolve } from 'node:path'
 import { ConfigError, parseExperiments } from './config.ts'
-import { exitCodeFor, levelLabel, renderOutcome, runExperiment, type RunOutcome } from './run.ts'
+import { adapterIds } from '../adapters/registry.ts'
+import { terminateAll } from '../adapters/spawn.ts'
+import { abortAllDeliberations } from '../deliberation/scheduler.ts'
+import { ALL_PERSONAS } from '../deliberation/personas.ts'
+import { renderOutcome, runBatch, runExperiment, writeOutput } from './run.ts'
 
 const USAGE = `roundstorm — run a deliberation from a config file
 
@@ -66,7 +70,9 @@ async function main(): Promise<number> {
 
   let configs
   try {
-    configs = parseExperiments(text, extname(path).toLowerCase() === '.jsonl')
+    configs = parseExperiments(text, extname(path).toLowerCase() === '.jsonl', {
+      brains: adapterIds(), personas: ALL_PERSONAS.map(p => p.key),
+    })
   } catch (err) {
     // Config problems are the user's to fix, so say which field and stop before
     // anything is created or billed.
@@ -86,15 +92,17 @@ async function main(): Promise<number> {
     return 0
   }
 
-  const outcomes: RunOutcome[] = []
-  let worst = 0
-  for (const [i, cfg] of configs.entries()) {
-    if (configs.length > 1) say(`experiment ${i + 1} of ${configs.length}: ${cfg.room.name}`)
-    const outcome = await runExperiment(cfg, say)
-    outcomes.push(outcome)
-    say(`${levelLabel(outcome.card)} — ${outcome.messages} turns, ${Math.round(outcome.ms / 1000)}s`)
-    worst = Math.max(worst, exitCodeFor(outcome))
-  }
+  // Ctrl-C used to leave the deliberation `running` in the store and the brain
+  // processes alive, still billing. The same two calls the daemon uses on shutdown.
+  let interrupted = false
+  process.once('SIGINT', () => {
+    interrupted = true
+    const stopped = abortAllDeliberations()
+    const killed = terminateAll()
+    process.stderr.write(`\ninterrupted: stopped ${stopped} deliberation(s), ended ${killed} brain process(es)\n`)
+  })
+
+  const { outcomes, worst } = await runBatch(configs, runExperiment, say)
 
   const rendered = opts.json
     ? JSON.stringify(outcomes.map(o => ({
@@ -114,10 +122,13 @@ async function main(): Promise<number> {
 
   process.stdout.write(rendered + '\n')
   if (opts.out) {
-    writeFileSync(opts.out, rendered + '\n')
-    say(`written to ${opts.out}`)
+    // A failed write must not turn a finished run into exit 3: the result is
+    // already on stdout, and the run's own code is the one a script branches on.
+    const problem = writeOutput(opts.out, rendered + '\n')
+    if (problem) process.stderr.write(`${problem}\n`)
+    else say(`written to ${opts.out}`)
   }
-  return worst
+  return interrupted ? 130 : worst
 }
 
 main().then(

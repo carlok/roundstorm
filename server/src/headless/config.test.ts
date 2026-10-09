@@ -110,3 +110,102 @@ test('the shipped examples are valid', () => {
   assert.ok(parseExperiment(readFileSync('examples/conclave.jsonc', 'utf8')).agents.length >= 2)
   assert.equal(parseExperiments(readFileSync('examples/personas.jsonl', 'utf8'), true).length, 2)
 })
+
+// --- a config that is accepted and quietly ignored is worse than one that is refused ---
+
+test('an unknown top-level key is refused, with the field it was probably meant to be', () => {
+  // `"round": 5` used to parse cleanly and the default of 3 silently won, so the
+  // run looked like the experiment that was written and was not.
+  assert.throws(() => parseExperiment(withMinimal({ round: 5 })),
+    (e: Error) => e instanceof ConfigError && /"round"/.test(e.message) && /did you mean "rounds"/.test(e.message))
+})
+
+test('snake_case is caught too, not just near-misses', () => {
+  assert.throws(() => parseExperiment(withMinimal({ sealed_opening: false })),
+    (e: Error) => /"sealed_opening"/.test(e.message) && /sealedOpening/.test(e.message))
+})
+
+test('an unknown key with no close match lists what is valid', () => {
+  assert.throws(() => parseExperiment(withMinimal({ temperature: 0.2 })),
+    (e: Error) => /"temperature"/.test(e.message) && /rounds/.test(e.message) && /question/.test(e.message))
+})
+
+test('unknown keys are caught inside room and inside an agent', () => {
+  assert.throws(() => parseExperiment(withMinimal({ room: { name: 'R', teir: 'full' } })),
+    (e: Error) => /room/.test(e.message) && /did you mean "tier"/.test(e.message))
+  assert.throws(() => parseExperiment(withMinimal({
+    agents: [{ name: 'A', persona: 'skeptic', brain: 'claude', tierCeling: 'full' }] })),
+    (e: Error) => /agents\[0\]/.test(e.message) && /did you mean "tierCeiling"/.test(e.message))
+})
+
+test('a boolean field is checked, not coerced', () => {
+  // `!!"false"` is true, so `"sealedOpening": "false"` turned sealing ON.
+  assert.throws(() => parseExperiment(withMinimal({ sealedOpening: 'false' })),
+    (e: Error) => /sealedOpening/.test(e.message) && /true or false/.test(e.message))
+  assert.equal(parseExperiment(withMinimal({ sealedOpening: false })).sealedOpening, false)
+})
+
+test('string fields are checked, not quietly dropped', () => {
+  assert.throws(() => parseExperiment(withMinimal({ workingDir: 42 })), /workingDir/)
+  assert.throws(() => parseExperiment(withMinimal({ project: ['x'] })), /project/)
+  assert.throws(() => parseExperiment(withMinimal({
+    agents: [{ name: 'A', persona: 'skeptic', brain: 'claude', model: 7 }] })), /model/)
+})
+
+// --- brain and persona must be things that exist ---
+
+const known = { brains: ['claude', 'codex', 'agy'], personas: ['skeptic', 'mathematician', 'custom'] }
+
+test('a mistyped brain is refused with the valid ones, when the caller knows them', () => {
+  // This used to create an agent that never spoke and left nothing in the transcript.
+  const text = withMinimal({ agents: [{ name: 'A', persona: 'skeptic', brain: 'claud' }] })
+  assert.throws(() => parseExperiment(text, known),
+    (e: Error) => /agents\[0\]/.test(e.message) && /"claud"/.test(e.message) && /claude, codex, agy/.test(e.message))
+})
+
+test('a mistyped persona is refused instead of silently becoming the first template', () => {
+  const text = withMinimal({ agents: [{ name: 'A', persona: 'skeptik', brain: 'claude' }] })
+  assert.throws(() => parseExperiment(text, known),
+    (e: Error) => /"skeptik"/.test(e.message) && /did you mean "skeptic"/.test(e.message))
+})
+
+test('without a known list, brain and persona are not checked (the parser stays pure)', () => {
+  const text = withMinimal({ agents: [{ name: 'A', persona: 'anything', brain: 'whatever' }] })
+  assert.equal(parseExperiment(text).agents[0].brain, 'whatever')
+})
+
+test('the shipped examples pass the strict rules', () => {
+  const conclave = readFileSync(new URL('../../../examples/conclave.jsonc', import.meta.url), 'utf8')
+  assert.doesNotThrow(() => parseExperiment(conclave))
+  const jsonl = readFileSync(new URL('../../../examples/personas.jsonl', import.meta.url), 'utf8')
+  assert.doesNotThrow(() => parseExperiments(jsonl, true))
+})
+
+// --- examples in prose are part of the contract ---
+
+test('every experiment example in the docs and the in-app sample validates', async () => {
+  // Strict keys mean a stale example now fails for the new user who copies it, which
+  // is exactly who reads them. Anything fenced as json/jsonc that has an "agents"
+  // array is an experiment file.
+  const { adapterIds } = await import('../adapters/registry.ts')
+  const { ALL_PERSONAS } = await import('../deliberation/personas.ts')
+  const known = { brains: adapterIds(), personas: ALL_PERSONAS.map(p => p.key) }
+
+  const files = ['README.md', 'docs/manual.md', 'docs/other-platforms.md']
+  const found: string[] = []
+  for (const f of files) {
+    const text = readFileSync(new URL(`../../../${f}`, import.meta.url), 'utf8')
+    for (const m of text.matchAll(/```(?:jsonc?|json5)\n([\s\S]*?)```/g)) {
+      if (/"agents"\s*:/.test(m[1])) found.push(`${f}: ${m[1].slice(0, 40).trim()}…`)
+      if (/"agents"\s*:/.test(m[1])) {
+        assert.doesNotThrow(() => parseExperiment(m[1], known), `${f} has an experiment example that no longer validates`)
+      }
+    }
+  }
+
+  const sample = readFileSync(new URL('../../../web/src/components/LoadExperiment.tsx', import.meta.url), 'utf8')
+  const lit = sample.match(/const SAMPLE = `([\s\S]*?)`/)
+  assert.ok(lit, 'the in-app sample moved; update this test')
+  assert.doesNotThrow(() => parseExperiment(lit![1].replace(/…/g, 'x'), known), 'the in-app sample no longer validates')
+  assert.ok(found.length >= 1, 'no experiment example found in the docs; the scan itself may be broken')
+})

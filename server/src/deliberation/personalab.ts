@@ -95,14 +95,17 @@ export function reportArm(roomId: string): ArmReport | null {
   const room = db.getRoom(roomId)
   if (!room) return null
   const roster = room.memberIds.map(id => db.getAgent(id)).filter((a): a is Agent => !!a)
-  const messages = db.listMessages(roomId).filter(m => m.authorType === 'agent')
-  // The room's latest run, matching where `conclusion` below comes from. Before
-  // this the level and positions were room-wide while the conclusion was not, so
-  // re-running an arm silently fused two experiments into one verdict.
+  // Everything in one report belongs to the room's latest run. The level and
+  // positions were scoped to it while the turn count, stance mix, cost and
+  // conclusion were room-wide, so re-running an arm fused two experiments into one
+  // verdict — and a latest run that produced no card reported the previous run's.
   const runs = db.listDeliberations(roomId)
   const latestRun = runs.length ? runs[runs.length - 1].id : undefined
+  const messages = db.listMessages(roomId)
+    .filter(m => m.authorType === 'agent' && (latestRun === undefined || m.deliberationId === latestRun))
   const ledger = summarise(roomId, roster, latestRun)
   const results = db.listResults(roomId)
+    .filter(c => latestRun === undefined || c.deliberationId === latestRun)
 
   const stanceMix: Record<string, number> = {}
   const basisMix: Record<string, number> = {}

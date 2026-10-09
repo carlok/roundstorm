@@ -142,6 +142,23 @@ test('a brain that cannot start is reported, not silently absent', async () => {
   assert.match(note!.body, /not installed/)
 })
 
+test('an agent whose brain does not exist leaves a visible trace', async () => {
+  // This used to write an activity event and return, so a mistyped brain in a
+  // config produced an agent that was simply absent from every round, with
+  // nothing in the transcript to say why.
+  const lone = db.createAgent({
+    name: `Ghost-${seq++}`, role: '', avatarColor: '#000', personaKey: 'skeptic', personaExtra: '',
+    brain: 'no-such-brain', model: null, tierCeiling: 'reasoning',
+  })
+  const r = db.createRoom(project.id, `GhostRoom-${seq++}`, 'room', [lone.id], 'reasoning')
+  await startDeliberation(deliberation(r.id, { rounds: 1 }))
+
+  const note = db.listMessages(r.id).find(m => m.authorType === 'system' && m.authorId === lone.id)
+  assert.ok(note, 'nothing in the transcript says the agent never ran')
+  assert.match(note!.body, /no-such-brain/)
+  assert.match(note!.body, new RegExp(lone.name))
+})
+
 // --- human steering ---
 
 test('a steer reaches the next round and then stops', async () => {

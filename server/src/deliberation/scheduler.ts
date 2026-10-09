@@ -238,6 +238,19 @@ export async function runTurn(args: {
   const adapter = getAdapter(agent.brain)
   if (!adapter) {
     setActivity(room.id, agent.id, 'error', `No adapter for ${agent.brain}`, round)
+    // Say so in the transcript, not only in the activity strip. A mistyped brain
+    // in a config used to produce an agent that was simply absent from every
+    // round, and nothing the reader could see explained why.
+    db.logEvent('turn.failed', {
+      roomId: room.id, deliberationId: deliberation.id, agentId: agent.id,
+      payload: { round, error: `no adapter for ${agent.brain}` },
+    })
+    const m = db.insertMessage({
+      roomId: room.id, authorType: 'system', authorId: agent.id,
+      body: `${agent.name} could not be started: there is no brain called "${agent.brain}".`,
+      round, deliberationId: deliberation.id,
+    })
+    bus.emit({ type: 'message', message: m })
     return
   }
 
