@@ -26,12 +26,71 @@ function resolveBase(): string {
 
 export const API_BASE = resolveBase()
 
-export const apiUrl = (path: string) => `${API_BASE}${path}`
+/**
+ * Add the daemon's token to a URL as `?token=`.
+ *
+ * A query parameter rather than a header because the places that need it cannot set
+ * one: an export link and `window.open` are plain navigations, and so is a
+ * WebSocket handshake. Applying it in `apiUrl` and `wsUrl` means every call that
+ * already goes through them — including the raw `fetch(apiUrl(...))` sites — picks
+ * it up without being touched. Any `token` already on the URL is replaced.
+ */
+export function appendToken(url: string, token: string | null): string {
+  if (!token) return url
+  const [base, query = ''] = url.split('?', 2)
+  const kept = query.split('&').filter(p => p && !p.startsWith('token='))
+  kept.push(`token=${encodeURIComponent(token)}`)
+  return `${base}?${kept.join('&')}`
+}
+
+/** `#token=…` out of a URL fragment, for a browser user who set ROUNDSTORM_TOKEN. */
+export function tokenFromHash(hash: string): string | null {
+  const m = /(?:^#|&)token=([^&]*)/.exec(hash)
+  if (!m || !m[1]) return null
+  try {
+    return decodeURIComponent(m[1])
+  } catch {
+    return null
+  }
+}
+
+const STORAGE_KEY = 'roundstorm-token'
+let cachedToken: string | null | undefined
+
+/**
+ * Where this page's token comes from.
+ *
+ * In the desktop app the shell injects `window.__ROUNDSTORM_TOKEN__` before any
+ * page script runs. In a browser, the person who set ROUNDSTORM_TOKEN opens the
+ * interface once as `/#token=…`; it is kept in sessionStorage for the tab and the
+ * fragment is removed from the address bar so it does not sit in history.
+ * Read lazily and cached: this runs on every request.
+ */
+export function currentToken(): string | null {
+  if (cachedToken !== undefined) return cachedToken
+  if (typeof window === 'undefined') return (cachedToken = null)
+  const injected = (window as { __ROUNDSTORM_TOKEN__?: unknown }).__ROUNDSTORM_TOKEN__
+  if (typeof injected === 'string' && injected) return (cachedToken = injected)
+  try {
+    const fromHash = tokenFromHash(window.location.hash)
+    if (fromHash) {
+      window.sessionStorage.setItem(STORAGE_KEY, fromHash)
+      window.history.replaceState(null, '', window.location.pathname + window.location.search)
+      return (cachedToken = fromHash)
+    }
+    return (cachedToken = window.sessionStorage.getItem(STORAGE_KEY))
+  } catch {
+    return (cachedToken = null)   // storage blocked: behave as if there is no token
+  }
+}
+
+export const apiUrl = (path: string) => appendToken(`${API_BASE}${path}`, currentToken())
 
 export function wsUrl(): string {
-  if (API_BASE) return `${API_BASE.replace(/^http/, 'ws')}/ws`
-  const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-  return `${proto}://${location.host}/ws`
+  const base = API_BASE
+    ? `${API_BASE.replace(/^http/, 'ws')}/ws`
+    : `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`
+  return appendToken(base, currentToken())
 }
 
 /** fetch against the daemon, wherever it is. */

@@ -12,19 +12,24 @@ path to finding it.
 If the machines are on the same network, nothing needs installing. On the Mac:
 
 ```bash
+export ROUNDSTORM_TOKEN=$(openssl rand -hex 16); echo "$ROUNDSTORM_TOKEN"
 ROUNDSTORM_HOST=0.0.0.0 node dist-server/index.mjs
 ```
 
-Then open `http://<mac-ip>:8787` in Firefox, Chrome or Edge on the other machine.
+Then open `http://<mac-ip>:8787/#token=<the token printed above>` in Firefox, Chrome or
+Edge on the other machine. Once is enough: the page keeps it for the tab and removes
+it from the address bar.
 
 That verifies the whole interface — layout, keyboard, copy, search, the manual —
 under a different browser engine, and it needs no port at all. It does **not**
 exercise the daemon's platform code, because the daemon is still running on macOS.
 
-> **This exposes an unauthenticated API that can start processes on the Mac.**
-> At the workstation and full-local tiers that includes reading files and running
-> commands. Use it on a network you trust, and stop it when you are done. The
-> default bind is loopback and stays that way unless `ROUNDSTORM_HOST` is set.
+> **Without a token this exposes an unauthenticated API that can start processes on
+> the Mac.** At the workstation and full-local tiers that includes reading files and
+> running commands. Set `ROUNDSTORM_TOKEN` as well, and open the interface once as
+> `http://<mac-address>:8787/#token=<your token>`. Use it on a network you trust, and
+> stop it when you are done. The default bind is loopback and stays that way unless
+> `ROUNDSTORM_HOST` is set.
 
 ### 2. Run it properly on the machine
 

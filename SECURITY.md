@@ -15,10 +15,11 @@ not hours.
 
 ## The model, in one paragraph
 
-The daemon is an unauthenticated HTTP service bound to `127.0.0.1`. Anything
-running as you can drive it fully, and that is by design: it is a local tool, not a
-server. What it defends against is a *website* reaching it, and against a stored
-value quietly granting an agent more than it should.
+The daemon is an HTTP service bound to `127.0.0.1`. Anything running as you can
+drive it fully, and that is by design: it is a local tool, not a server. What it
+defends against is a *website* reaching it, another process or user that is not you
+reaching it (when a token is set), and a stored value quietly granting an agent
+more than it should.
 
 ## What is enforced
 
@@ -38,7 +39,13 @@ value quietly granting an agent more than it should.
 
 ## What is not
 
-- **No authentication, and no multi-user story.** Any local process has full access.
+- **The token does not stop malware running as you.** The desktop app generates a
+  random per-launch token and the daemon requires it on `/api` and `/ws`, but a
+  process running as your user can read the daemon's environment or memory and get
+  it. What it does stop is another process that can only open a loopback socket,
+  and another user on a shared machine. Outside the desktop app there is **no token
+  unless you set `ROUNDSTORM_TOKEN`**, and then everything that can reach the port
+  has full access. There is no multi-user story.
 - **The tier flags are advisory.** They are the CLIs' own modes, not a kernel
   sandbox. None of these tools confines shell execution to a directory, so at the
   `full` tier an agent can act outside the working directory. Treat that tier as

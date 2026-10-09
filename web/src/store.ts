@@ -5,6 +5,11 @@ import type {
   Persona, Position, Project, ResultCard, Room, ServerEvent, Source,
 } from './types.ts'
 
+/** Shown when the daemon is up but wants a token this page was not given. */
+export const NEEDS_TOKEN =
+  'This Roundstorm daemon requires an access token (ROUNDSTORM_TOKEN is set). '
+  + 'Open the interface once as http://<host>:<port>/#token=<your token>.'
+
 async function json<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(apiUrl(url), {
     ...init,
@@ -60,9 +65,16 @@ export function useRoundstorm() {
       try {
         await refreshBoot()
         if (!cancelled) setStarting(false)
-      } catch {
-        attempts++
+      } catch (err) {
         if (cancelled) return
+        // A 401 will not fix itself by waiting. Retrying for twenty seconds and then
+        // blaming "the daemon is not responding" sent people looking at the wrong
+        // thing: the daemon is up and is refusing, which is a different problem.
+        if (err instanceof Error && /unauthorised/i.test(err.message)) {
+          setError(NEEDS_TOKEN)
+          return
+        }
+        attempts++
         // Give up complaining silently after a while, but keep trying: the
         // daemon may just be slow to probe its brains on a cold start.
         if (attempts === 12) {

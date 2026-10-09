@@ -408,6 +408,7 @@ Rules, as built:
 - The tier is visible in the room header at all times. Not buried in settings.
 - Raising a tier is a labelled control in the room editor, with the meaning of each stop written beside it.
 - The tiers above Research need a working directory, and one that still exists. It is re-checked every turn, so a directory deleted mid-run downgrades the tier rather than letting the agent run wherever the daemon happens to be.
+- The desktop app generates a random token on every launch, hands it to the daemon as `ROUNDSTORM_TOKEN`, and injects it into its own page; the daemon then refuses `/api` and `/ws` without it (`server/src/http/auth.ts`). It is optional outside the app and unset by default. It does not stop malware running as the same user, which can read the daemon's environment; `SECURITY.md` says so.
 - Tier values are validated at every route that accepts one, and every tier→flag lookup treats an unrecognised value as the *most restrictive* tier. An unknown tier must never fall through to a permissive default.
 - Every tool call is logged as a `tool.used` event. The prompts themselves are logged as a digest, not verbatim — see §12.
 

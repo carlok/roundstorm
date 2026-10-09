@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useRoundstorm } from './store.ts'
+import { NEEDS_TOKEN, useRoundstorm } from './store.ts'
 import { Avatar } from './components/Avatar.tsx'
 import { MessageView } from './components/MessageView.tsx'
 import { ControlBar } from './components/ControlBar.tsx'
@@ -265,11 +265,13 @@ export function App() {
       <div className="booting">
         <div className="booting-inner">
           <p>Starting Roundstorm…</p>
-          <small>Waiting for the local daemon on 127.0.0.1:8787.</small>
-          {rs.error && (
+          {rs.error === NEEDS_TOKEN
+            ? <small className="booting-error">{rs.error}</small>
+            : <small>Waiting for the local daemon on 127.0.0.1:8787.</small>}
+          {rs.error && rs.error !== NEEDS_TOKEN && (
             <small className="booting-error">
               {rs.error}<br />
-              Run <code>npm run dev:daemon</code>, or check that Node 22+ is installed.
+              Run <code>npm run dev:daemon</code>, or check that Node 22.16 or newer is installed.
             </small>
           )}
         </div>

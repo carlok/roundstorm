@@ -18,11 +18,31 @@ struct Daemon(Mutex<Option<Child>>);
 
 const PORT: &str = "8787";
 
+/// A fresh random token for this launch, as 64 hex characters.
+///
+/// It is shared with exactly two parties: the daemon, through its environment, and
+/// this app's own page, through an initialization script. It is never written to the
+/// daemon's log file, which other accounts on the machine may be able to read.
+fn make_token() -> String {
+    let mut bytes = [0u8; 32];
+    getrandom::fill(&mut bytes).expect("the operating system could not provide random bytes");
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
 fn main() {
+    let token = make_token();
+    // Hex only, so interpolating it into a script cannot break out of the string.
+    let page_script = format!("window.__ROUNDSTORM_TOKEN__ = \"{token}\";");
+
     tauri::Builder::default()
+        // Runs in every webview before the page's own scripts, which is what makes
+        // the token available to the very first request. The window itself stays
+        // defined in tauri.conf.json: rebuilding it in code to use a per-window
+        // script would risk the titlebar behaviour that took several rounds to fix.
+        .append_invoke_initialization_script(page_script)
         .plugin(tauri_plugin_shell::init())
         .manage(Daemon(Mutex::new(None)))
-        .setup(|app| {
+        .setup(move |app| {
             // In dev the daemon is already running under `npm run dev`; starting
             // a second one would just fight over the port.
             if cfg!(debug_assertions) {
@@ -54,7 +74,7 @@ fn main() {
             // and getting it wrong ships a blank window.
             let origin = window_origin(app);
 
-            match spawn_daemon(&entry, &log_path, origin.as_deref()) {
+            match spawn_daemon(&entry, &log_path, origin.as_deref(), &token) {
                 Ok(child) => {
                     app.state::<Daemon>().0.lock().unwrap().replace(child);
                 }
@@ -104,6 +124,7 @@ fn spawn_daemon(
     entry: &std::path::Path,
     log_path: &std::path::Path,
     origin: Option<&str>,
+    token: &str,
 ) -> std::io::Result<Child> {
     // A GUI app launched from Finder does not inherit a login shell's PATH, so
     // the usual install locations have to be probed explicitly.
@@ -129,6 +150,9 @@ fn spawn_daemon(
         // — a crash or a force-quit, which no exit handler can catch.
         .env("ROUNDSTORM_PARENT_PID", std::process::id().to_string())
         .env("ROUNDSTORM_ALLOWED_ORIGINS", origin.unwrap_or_default())
+        // With this set the daemon refuses /api and /ws without it. See
+        // server/src/http/auth.ts for what that does and does not protect against.
+        .env("ROUNDSTORM_TOKEN", token)
         .stdout(Stdio::from(log))
         .stderr(Stdio::from(errlog))
         .spawn()

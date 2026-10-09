@@ -6,7 +6,8 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { WebSocketServer } from 'ws'
 import { makeApi } from './api.ts'
-import { requestAllowed, warnRefused } from './http/origin.ts'
+import { warnRefused } from './http/origin.ts'
+import { tokenRequired, websocketAllowed } from './http/auth.ts'
 import { bus } from './bus.ts'
 import { seedIfEmpty } from './seed.ts'
 import { probeBrains } from './adapters/registry.ts'
@@ -97,9 +98,9 @@ const wss = new WebSocketServer({
   // `req.headers.origin`, not `info.origin`: ws normalises absent to '' in some
   // versions, and '' must read as "no browser", not as an unparseable origin.
   verifyClient: ({ req }, done) => {
-    const ok = requestAllowed(req.headers.origin, req.headers.host)
-    if (!ok) warnRefused(req.headers.origin, req.headers.host)
-    done(ok, 403, 'refused: unrecognised Origin or Host')
+    const v = websocketAllowed(req)
+    if (!v.ok && v.status === 403) warnRefused(req.headers.origin, req.headers.host)
+    done(v.ok, v.status, v.reason)
   },
 })
 // It shares the http server, so it re-emits that server's listen failure. Left
@@ -217,6 +218,13 @@ server.listen(PORT, HOST, async () => {
   console.log(`roundstorm daemon  http://127.0.0.1:${PORT}`)
   console.log(`data               ${DATA_PATH}`)
   console.log(`storage            ${db.backend} (SQLite ${db.sqliteVersion})`)
+  // Say that a token is required, never what it is: when the shell starts the
+  // daemon this stdout is a log file other accounts on the machine may be able to
+  // read, and printing the secret there would defeat it.
+  if (tokenRequired()) {
+    console.log('access             ROUNDSTORM_TOKEN is set: /api and /ws need it')
+    console.log('                   in a browser, open the interface once as  http://<host>:<port>/#token=<your token>')
+  }
   // Absent is normal, not a fault: the desktop shell embeds the UI in its own
   // binary, and `npm run dev` has Vite serve it.
   console.log(webRoot

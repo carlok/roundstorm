@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path'
 import * as db from './db.ts'
 import { bus } from './bus.ts'
 import { requestAllowed, warnRefused } from './http/origin.ts'
+import { tokenFrom, tokenOk, warnUnauthorised } from './http/auth.ts'
 import { ALL_PERSONAS } from './deliberation/personas.ts'
 import { MODE_BLURB, MODE_LABEL } from './deliberation/context.ts'
 import { adapterIds, listBrainOptions, probeBrains } from './adapters/registry.ts'
@@ -43,12 +44,26 @@ export function makeApi() {
     if (origin) {
       res.setHeader('access-control-allow-origin', origin)
       res.setHeader('vary', 'origin')
-      res.setHeader('access-control-allow-headers', 'content-type')
+      res.setHeader('access-control-allow-headers', 'content-type, authorization')
       res.setHeader('access-control-allow-methods', 'GET,POST,PATCH,DELETE,OPTIONS')
       res.setHeader('access-control-max-age', '600')
     }
     if (req.method === 'OPTIONS') return res.sendStatus(204)
     next()
+  })
+
+  /**
+   * The bearer token, when one is configured (see http/auth.ts).
+   *
+   * After the origin gate and after the preflight answer above, in that order: a
+   * browser sends a preflight without credentials, so it has to be answered before
+   * the token is demanded, and a website holding a leaked token must still be
+   * refused by origin.
+   */
+  api.use((req, res, next) => {
+    if (tokenOk(tokenFrom(req.headers.authorization, req.originalUrl))) return next()
+    warnUnauthorised('http')
+    res.status(401).json({ error: 'unauthorised: missing or wrong token' })
   })
 
   api.use(express.json({ limit: '8mb' }))

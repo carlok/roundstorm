@@ -103,9 +103,11 @@ server. [`docs/other-platforms.md`](docs/other-platforms.md) has the clone-and-r
 steps and a checklist of what to verify.
 
 To drive the interface from another machine without installing anything there,
-`ROUNDSTORM_HOST=0.0.0.0` binds beyond loopback — **which exposes an
-unauthenticated API that can start processes on this machine.** Trusted networks
-only, and only while you need it. The default is loopback.
+`ROUNDSTORM_HOST=0.0.0.0` binds beyond loopback. **Set `ROUNDSTORM_TOKEN` when you
+do** — without one that exposes an unauthenticated API that can start processes on
+this machine, and the daemon says so loudly at boot. With one, open the interface
+once as `http://<host>:8787/#token=<your token>`. Trusted networks only, and only
+while you need it. The default is loopback.
 
 The daemon itself is platform-aware: binaries are resolved through `PATHEXT` so
 `claude.cmd` and `codex.exe` are both found, npm shims are launched through a
@@ -357,8 +359,9 @@ reused agent changes brain or persona (agent names are shared across the whole s
 ## Driving it over HTTP
 
 The daemon is a plain HTTP service on `127.0.0.1:8787`, so anything that speaks
-HTTP can drive it. There is no auth — see [Security](#security) for what that does
-and does not mean.
+HTTP can drive it. By default there is no auth; set `ROUNDSTORM_TOKEN` and send it
+as `Authorization: Bearer …` (or `?token=…`). See [Security](#security) for what
+that does and does not mean.
 
 Deliberations are asynchronous: start one, then poll the room or subscribe to the
 WebSocket at `/ws`.
@@ -475,8 +478,14 @@ web/src/                React UI
 Roundstorm runs AI agents that can, at the upper tiers, read files and execute
 programs on this machine. Worth knowing before you raise a tier:
 
-**There is no authentication.** The daemon binds to `127.0.0.1` by default, so it
-is reachable by anything already running as you. That is the whole access control.
+**Authentication is optional, and what it protects against is narrow.** The daemon
+binds to `127.0.0.1` by default. The desktop app generates a random token on every
+launch, gives it to the daemon, and injects it into its own page, so `/api` and
+`/ws` refuse everything else. That stops another process that can open a loopback
+socket but cannot read this app's memory or environment, and another user on a
+shared machine. It does **not** stop malware running as you, which can read the
+daemon's environment. Run `node dist-server/index.mjs` yourself and there is no
+token unless you set `ROUNDSTORM_TOKEN`.
 
 **Websites cannot reach it.** A browser page is not "a local process", and the API
 used to reflect any `Origin` back, which let any site you visited read every
@@ -485,9 +494,10 @@ refuses a `Host` that is a name rather than an address, which is what stops DNS
 rebinding. The same check guards the WebSocket. Set `ROUNDSTORM_ALLOWED_ORIGINS`
 if you are serving the UI from somewhere unusual.
 
-**`ROUNDSTORM_HOST=0.0.0.0` hands the LAN an unauthenticated API** that can start
-processes here. The daemon prints a four-line warning when you do it. Trusted
-networks only, and only while you need it.
+**`ROUNDSTORM_HOST=0.0.0.0` hands the LAN an API that can start processes here.**
+Set `ROUNDSTORM_TOKEN` when you use it: without one it is unauthenticated, and the
+daemon prints a four-line warning. Trusted networks only, and only while you need
+it.
 
 **The tier flags are advisory, not a sandbox.** They are the per-CLI mode flags
 (`--sandbox`, `--mode ask`, `--mode plan`) plus a working directory passed as
