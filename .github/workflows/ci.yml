@@ -46,3 +46,27 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run test:ui
+
+  # The Tauri shell. Nothing above builds Rust, so a dependency bump to the shell
+  # used to show green while proving nothing: three Cargo PRs did exactly that.
+  # `cargo check` is enough to catch a broken bump or a stale lockfile; the full
+  # bundle is still built and launched by hand before a release, since that is
+  # where a blank window shows up.
+  rust:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # build.rs checks that the resources named in tauri.conf.json exist
+      # (../dist-server, ../dist-web), so the JS build has to run first.
+      - run: npm run build
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: cargo check --locked
+        working-directory: src-tauri
