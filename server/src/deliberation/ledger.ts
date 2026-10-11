@@ -7,7 +7,9 @@
  */
 import * as db from '../db.ts'
 import { nearest } from '../search/embeddings.ts'
-import type { Agent, ConsensusLevel, Position } from '../types.ts'
+import { LEVEL_LABEL, type Agent, type ConsensusLevel, type Position } from '../types.ts'
+
+export { LEVEL_LABEL }
 import type { RawPositionOp } from './contract.ts'
 
 /**
@@ -187,16 +189,6 @@ export function summarise(roomId: string, roster: Agent[], deliberationId?: stri
   else level = 'consensus_with_reservations'
 
   return { positions, leading, level, headline: LEVEL_LABEL[level] }
-}
-
-export const LEVEL_LABEL: Record<ConsensusLevel, string> = {
-  strong_consensus: 'Strong consensus',
-  consensus_with_reservations: 'Consensus with reservations',
-  two_positions: 'Two competing positions remain',
-  no_reliable_conclusion: 'No reliable conclusion',
-  evidence_required: 'Additional evidence required',
-  conclave_reached: 'Unanimous — conclave reached',
-  conclave_failed: 'Conclave failed to reach consensus',
 }
 
 /**

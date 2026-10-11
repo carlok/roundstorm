@@ -8,7 +8,7 @@
  *
  * The synthesiser is also a neutral agent that took no side in the debate.
  */
-import type { Agent, ConsensusLevel, Deliberation, ResultCard } from '../types.ts'
+import { RESULT_PREFIX, type Agent, type ConsensusLevel, type Deliberation, type ResultCard } from '../types.ts'
 import * as db from '../db.ts'
 import { bus } from '../bus.ts'
 import { getAdapter, schemaFor } from '../adapters/registry.ts'
@@ -60,7 +60,7 @@ export async function synthesise(deliberationId: string, signal: AbortSignal): P
   // The card lands in the transcript as a pinned message so it is where the
   // reader already is, not in a panel they have to go find.
   const m = db.insertMessage({
-    roomId: d.roomId, authorType: 'system', body: `__result__:${card.id}`,
+    roomId: d.roomId, authorType: 'system', body: `${RESULT_PREFIX}${card.id}`,
     deliberationId: d.id,
   })
   bus.emit({ type: 'message', message: m })

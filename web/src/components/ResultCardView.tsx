@@ -1,17 +1,8 @@
 import type React from 'react'
 import { useState } from 'react'
 import type { ResultCard } from '../types.ts'
+import { LEVEL_LABEL } from '../../../server/src/types.ts'
 import { Markdown } from './Markdown.tsx'
-
-const LEVEL_LABEL: Record<string, string> = {
-  strong_consensus: 'Strong consensus',
-  consensus_with_reservations: 'Consensus with reservations',
-  two_positions: 'Two competing positions remain',
-  no_reliable_conclusion: 'No reliable conclusion',
-  evidence_required: 'Additional evidence required',
-  conclave_reached: 'Unanimous — conclave reached',
-  conclave_failed: 'Conclave failed to reach consensus',
-}
 
 /**
  * Pinned at the end of the transcript (plan §13). "Two positions remain" and

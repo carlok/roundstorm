@@ -1,14 +1,5 @@
 import type { Agent, Message, ResultCard } from '../types.ts'
-
-const LEVEL_LABEL: Record<string, string> = {
-  strong_consensus: 'Strong consensus',
-  consensus_with_reservations: 'Consensus with reservations',
-  two_positions: 'Two competing positions remain',
-  no_reliable_conclusion: 'No reliable conclusion',
-  evidence_required: 'Additional evidence required',
-  conclave_reached: 'Unanimous — conclave reached',
-  conclave_failed: 'Conclave failed to reach consensus',
-}
+import { LEVEL_LABEL } from '../../../server/src/types.ts'
 
 export function resultToMarkdown(c: ResultCard): string {
   const list = (title: string, items: string[]) =>

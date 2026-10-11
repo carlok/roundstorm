@@ -176,6 +176,24 @@ export type ConsensusLevel =
   | 'conclave_reached'
   | 'conclave_failed'
 
+export const LEVEL_LABEL: Record<ConsensusLevel, string> = {
+  strong_consensus: 'Strong consensus',
+  consensus_with_reservations: 'Consensus with reservations',
+  two_positions: 'Two competing positions remain',
+  no_reliable_conclusion: 'No reliable conclusion',
+  evidence_required: 'Additional evidence required',
+  conclave_reached: 'Unanimous — conclave reached',
+  conclave_failed: 'Conclave failed to reach consensus',
+}
+
+/**
+ * A result card is pinned into the transcript as a system message whose body is
+ * this prefix and the card's id. Everything that has to tell one from an
+ * ordinary message goes through `isResultBody`.
+ */
+export const RESULT_PREFIX = '__result__:'
+export const isResultBody = (body: string): boolean => body.startsWith(RESULT_PREFIX)
+
 export interface ResultCard {
   id: string
   deliberationId: string

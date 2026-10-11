@@ -4,7 +4,7 @@ import { Avatar } from './components/Avatar.tsx'
 import { MessageView } from './components/MessageView.tsx'
 import { ControlBar } from './components/ControlBar.tsx'
 import { StartSheet, type StartPreset } from './components/StartSheet.tsx'
-import { TIER_LABEL } from '../../server/src/types.ts'
+import { TIER_LABEL, isResultBody } from '../../server/src/types.ts'
 import { SelectionBar } from './components/SelectionBar.tsx'
 import { SearchBar } from './components/SearchBar.tsx'
 import { ContextMenu, type MenuItem } from './components/ContextMenu.tsx'
@@ -431,7 +431,7 @@ export function App() {
             </div>
           )}
           {withRoundDividers(rs.messages).map(item => {
-            if (item.kind === 'msg' && item.message.body.startsWith('__result__:')) {
+            if (item.kind === 'msg' && isResultBody(item.message.body)) {
               const card = rs.results.find(r => r.id === item.message.body.slice(11))
               return card
                 ? <ResultCardView key={card.id} card={card}
