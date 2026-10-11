@@ -324,6 +324,24 @@ test('deleting a room takes its memory with it', () => {
   assert.equal(db.listMemory({ agentId: A.id }).filter(x => x.roomId === r.id).length, 0)
 })
 
+test('clearing or deleting a room removes its activity log, and only its own', () => {
+  const proj = db.createProject('Logged')
+  const a = db.createRoom(proj.id, 'Log A', 'room', [A.id])
+  const b = db.createRoom(proj.id, 'Log B', 'room', [A.id])
+  db.logEvent('turn.started', { roomId: a.id })
+  db.logEvent('turn.started', { roomId: b.id })
+  assert.equal(db.listEvents(a.id).length, 1)
+
+  db.clearRoom(a.id)
+  assert.equal(db.listEvents(a.id).length, 0, 'a cleared room kept its events')
+  assert.equal(db.listEvents(b.id).length, 1, 'clearing one room touched another\'s events')
+
+  db.logEvent('turn.started', { roomId: a.id })
+  db.deleteRoom(a.id)
+  assert.equal(db.listEvents(a.id).length, 0, 'a deleted room kept its events')
+  assert.equal(db.listEvents(b.id).length, 1)
+})
+
 // --- one room, more than one deliberation ---
 
 test('a second deliberation does not inherit the first one\'s consensus', async () => {

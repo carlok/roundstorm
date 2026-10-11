@@ -469,7 +469,7 @@ Agents keep identity and memory everywhere; each room's transcript stays local t
 
 ## 12. Activity, logs, auditability
 
-Two strictly separated surfaces.
+Two strictly separated surfaces. The activity log belongs to its room: clearing or deleting a room removes its events too (a `room.cleared` entry records that a clear happened). It is a debugging aid, not an audit trail that outlives the room.
 
 **The transcript** is clean. Only messages, round dividers, human interventions, and result cards. Never raw tool output. Never internal errors. It should be pleasant to read six months later.
 
