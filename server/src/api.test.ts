@@ -89,6 +89,17 @@ test('a 404 is a 404, not an empty 200', async () => {
   assert.equal(res.status, 404)
 })
 
+test('stop, interrupt, extend and a room edit on an unknown id are 404s', async () => {
+  for (const path of ['stop', 'interrupt', 'extend']) {
+    const res = await post(`/api/deliberations/no-such-run/${path}`, {})
+    assert.equal(res.status, 404, `${path} answered ${res.status} for an id that does not exist`)
+  }
+  const res = await fetch(`${origin}/api/rooms/no-such-room`, {
+    method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'x' }),
+  })
+  assert.equal(res.status, 404)
+})
+
 // --- privilege fields ---
 
 /** An agent with a known ceiling, to prove a refused request changed nothing. */

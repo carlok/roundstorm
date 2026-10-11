@@ -11,7 +11,7 @@ import * as db from '../db.ts'
 import { startDeliberation } from '../deliberation/scheduler.ts'
 import { LEVEL_LABEL } from '../deliberation/ledger.ts'
 import { renderCard } from '../deliberation/export.ts'
-import type { Agent, ResultCard, Room } from '../types.ts'
+import { isResultBody, type Agent, type ResultCard, type Room } from '../types.ts'
 import type { ExperimentConfig } from './config.ts'
 import { formatCost, sumCost } from '../deliberation/cost.ts'
 
@@ -137,7 +137,7 @@ export async function runExperiment(
     pricedTurns: cost.priced,
     // A turn that could not start is reported as a system message; counting them
     // separately stops a run that half-failed from looking like a clean result.
-    failedTurns: messages.filter(m => m.authorType === 'system' && !m.body.startsWith('__result__')).length,
+    failedTurns: messages.filter(m => m.authorType === 'system' && !isResultBody(m.body)).length,
     ms: Date.now() - started,
   }
 }

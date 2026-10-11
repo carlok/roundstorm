@@ -3,7 +3,7 @@
  * is not usable in a paper, so exports carry the ledger and the sources, not
  * just the prose.
  */
-import type { Agent, Deliberation, Message, Position, ResultCard, Room, Source } from '../types.ts'
+import { isResultBody, type Agent, type Deliberation, type Message, type Position, type ResultCard, type Room, type Source } from '../types.ts'
 import { LEVEL_LABEL } from './ledger.ts'
 
 export interface ExportPayload {
@@ -52,7 +52,7 @@ export function renderResultMarkdown(p: ExportPayload): string {
   out.push('## Transcript', '')
   let round: number | null = null
   for (const m of p.messages) {
-    if (m.body.startsWith('__result__:')) continue
+    if (isResultBody(m.body)) continue
     if (m.round !== round && m.round != null) {
       out.push(`### Round ${m.round}`, '')
       round = m.round

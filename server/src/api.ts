@@ -283,6 +283,7 @@ export function makeApi() {
   })
 
   api.post('/deliberations/:id/interrupt', (req, res) => {
+    if (!db.getDeliberation(req.params.id)) return res.status(404).json({ error: 'no such deliberation' })
     interruptDeliberation(req.params.id)
     res.json(db.getDeliberation(req.params.id))
   })
@@ -308,6 +309,7 @@ export function makeApi() {
   })
 
   api.patch('/rooms/:id', (req, res) => {
+    if (!db.getRoom(req.params.id)) return res.status(404).json({ error: 'no such room' })
     const { tier, memberIds, name } = req.body ?? {}
     if (tier !== undefined) {
       if (!isTier(tier)) return res.status(400).json({ error: `tier ${tierError.error}` })
@@ -514,6 +516,7 @@ export function makeApi() {
   })
 
   api.post('/deliberations/:id/stop', (req, res) => {
+    if (!db.getDeliberation(req.params.id)) return res.status(404).json({ error: 'no such deliberation' })
     stopDeliberation(req.params.id)
     res.json(db.getDeliberation(req.params.id))
   })
@@ -521,6 +524,7 @@ export function makeApi() {
   api.post('/deliberations/:id/extend', (req, res) => {
     const by = roundsOrNull(req.body?.by ?? 1)
     if (by === null) return res.status(400).json({ error: 'by must be a whole number from 1 to 20' })
+    if (!db.getDeliberation(req.params.id)) return res.status(404).json({ error: 'no such deliberation' })
     extendDeliberation(req.params.id, by)
     res.json(db.getDeliberation(req.params.id))
   })
