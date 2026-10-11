@@ -14,6 +14,7 @@
 import * as db from '../db.ts'
 import type { Agent, Basis, Room, Stance } from '../types.ts'
 import { summarise } from './ledger.ts'
+import { sumCost } from './cost.ts'
 
 export interface ArmSpec {
   /** Display name for this arm, e.g. "all Claude" or "mixed brains". */
@@ -77,7 +78,10 @@ export interface ArmReport {
   mindChanges: number
   /** Positions carrying opposition — how contested the question actually was. */
   contested: number
-  costUsd: number
+  /** Sum over the turns that reported a cost; null when none did. */
+  costUsd: number | null
+  /** How many of `turns` reported a cost. */
+  pricedTurns: number
   medianWords: number
 }
 
@@ -109,18 +113,18 @@ export function reportArm(roomId: string): ArmReport | null {
 
   const stanceMix: Record<string, number> = {}
   const basisMix: Record<string, number> = {}
-  let degraded = 0, cost = 0
+  let degraded = 0
   const wordCounts: number[] = []
 
   for (const m of messages) {
     if (m.stance) stanceMix[m.stance] = (stanceMix[m.stance] ?? 0) + 1
     for (const c of m.claims) basisMix[c.basis] = (basisMix[c.basis] ?? 0) + 1
     if (m.degraded) degraded++
-    cost += m.costUsd ?? 0
     wordCounts.push(m.body.trim().split(/\s+/).length)
   }
 
   wordCounts.sort((a, b) => a - b)
+  const cost = sumCost(messages)
 
   return {
     mindChanges: countMindChanges(roomId, messages, latestRun),
@@ -140,7 +144,8 @@ export function reportArm(roomId: string): ArmReport | null {
     turns: messages.length,
     degraded,
     concessions: (stanceMix['concede'] ?? 0),
-    costUsd: Number(cost.toFixed(4)),
+    costUsd: cost.usd,
+    pricedTurns: cost.priced,
     medianWords: wordCounts.length ? wordCounts[Math.floor(wordCounts.length / 2)] : 0,
   }
 }
@@ -190,8 +195,16 @@ function observe(arms: ArmReport[]): string[] {
     out.push(`Turn length varied a lot between arms: median ${words.min} to ${words.max} words.`)
   }
 
-  const cost = spread('costUsd')
-  if (cost.max > 0) out.push(`Cost per arm ranged $${cost.min.toFixed(2)}–$${cost.max.toFixed(2)}.`)
+  const priced = arms.filter(a => a.costUsd != null)
+  if (priced.length) {
+    const costs = priced.map(a => a.costUsd as number)
+    const lo = Math.min(...costs), hi = Math.max(...costs)
+    const partial = arms.some(a => a.pricedTurns < a.turns)
+    out.push(`Cost per arm ${partial ? 'ranged (at least) ' : 'ranged '}$${lo.toFixed(2)}–$${hi.toFixed(2)}`
+      + (priced.length < arms.length
+        ? `, but ${arms.length - priced.length} of ${arms.length} arms reported no cost, so they are not comparable on price.`
+        : partial ? '; some turns reported no cost, so these are floors.' : '.'))
+  }
 
   const degraded = arms.filter(a => a.degraded > 0)
   if (degraded.length) {

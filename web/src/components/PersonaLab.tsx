@@ -9,7 +9,7 @@ interface ArmReport {
   positions: { label: string; title: string; support: number; oppose: number }[]
   stanceMix: Record<string, number>; basisMix: Record<string, number>
   turns: number; degraded: number; concessions: number
-  mindChanges: number; contested: number; costUsd: number; medianWords: number
+  mindChanges: number; contested: number; costUsd: number | null; pricedTurns: number; medianWords: number
 }
 
 /**
@@ -168,7 +168,7 @@ export function PersonaLab({ personas, brains, projectId, rooms, onClose, onGoTo
                         <Row k="Contested" v={a.contested ? `${a.contested} position${a.contested === 1 ? '' : 's'}` : 'nothing opposed'} />
                         <Row k="Median words" v={String(a.medianWords)} />
                         <Row k="Unstructured" v={String(a.degraded)} />
-                        <Row k="Cost" v={a.costUsd ? `$${a.costUsd.toFixed(3)}` : '—'} />
+                        <Row k="Cost" v={a.costUsd == null ? 'n/a' : `$${a.costUsd.toFixed(3)}${a.pricedTurns < a.turns ? ` (${a.pricedTurns}/${a.turns} turns)` : ''}`} />
                         <Row k="Stances" v={mix(a.stanceMix)} />
                         <Row k="Claim basis" v={mix(a.basisMix)} />
                       </dl>
