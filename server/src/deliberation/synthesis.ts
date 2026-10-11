@@ -46,11 +46,15 @@ export async function synthesise(deliberationId: string, signal: AbortSignal): P
   const ledger = summarise(d.roomId, roster, d.id)
   const level = resolveLevel(d, ledger.level)
 
-  const card = await narrate({ d, room: room.name, roster, messages, level, ledger, signal })
+  let costUsd: number | null = null
+  const card = await narrate({
+    d, room: room.name, roster, messages, level, ledger, signal,
+    onCost: usd => { costUsd = (costUsd ?? 0) + usd },
+  })
   db.saveResult(card)
   db.logEvent('synthesis.completed', {
     roomId: d.roomId, deliberationId: d.id,
-    payload: { level, positions: ledger.positions.length },
+    payload: { level, positions: ledger.positions.length, costUsd },
   })
 
   // The card lands in the transcript as a pinned message so it is where the
@@ -102,6 +106,8 @@ async function narrate(args: {
   level: ConsensusLevel
   ledger: ReturnType<typeof summarise>
   signal: AbortSignal
+  /** Called with each cost the synthesiser's brain reports. */
+  onCost?: (usd: number) => void
 }): Promise<ResultCard> {
   const { d, room, roster, messages, level, ledger, signal } = args
 
@@ -184,7 +190,10 @@ ${transcript}`
       tier: 'reasoning', workingDir: null,
       schema: schemaFor(adapter, RESULT_SCHEMA),
     }, signal)) {
-      if (ev.type === 'final') { structured = ev.structured; text = ev.text }
+      if (ev.type === 'final') {
+        structured = ev.structured; text = ev.text
+        if (ev.costUsd != null) args.onCost?.(ev.costUsd)
+      }
       else if (ev.type === 'delta') text = ev.text
     }
   } catch {
