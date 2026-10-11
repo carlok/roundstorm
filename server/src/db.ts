@@ -333,9 +333,16 @@ export function deleteAgent(id: string): { removedFromRooms: number } {
  * Memory cards are not covered by the foreign key (they hang off the agent), so
  * they are removed explicitly — otherwise an agent keeps remembering a room the
  * user deleted.
+ *
+ * The room's activity log goes too. The log is a debugging aid for live rooms,
+ * not an audit trail that outlives them: keeping it would leave a deleted
+ * room's turns (digests, errors, costs) in the database after the user asked
+ * for them to be gone. The `room.deleted` event the API writes afterwards
+ * carries no room id, so it is the one thing that remains.
  */
 export function deleteRoom(id: string) {
   db.prepare('DELETE FROM memory_cards WHERE room_id=?').run(id)
+  db.prepare('DELETE FROM events WHERE room_id=?').run(id)
   db.prepare('DELETE FROM rooms WHERE id=?').run(id)
 }
 
@@ -347,7 +354,8 @@ export function deleteRoom(id: string) {
  * in the inbox and the ones already accepted into an agent's long-term memory.
  * Leaving accepted cards behind would mean an agent still "remembers" a
  * discussion the user believes they erased, and silently carries it into the
- * next one. Clearing has to mean clearing.
+ * next one. Clearing has to mean clearing — the activity log included. The API
+ * logs `room.cleared` afterwards, so the log still says that a clear happened.
  */
 export function clearRoom(id: string): { messages: number; memoryCards: number } {
   const n = (db.prepare('SELECT COUNT(*) AS c FROM messages WHERE room_id=?').get(id) as any).c
@@ -359,6 +367,7 @@ export function clearRoom(id: string): { messages: number; memoryCards: number }
   db.prepare('DELETE FROM results WHERE room_id=?').run(id)
   db.prepare('DELETE FROM deliberations WHERE room_id=?').run(id)
   db.prepare('DELETE FROM embeddings WHERE room_id=?').run(id)
+  db.prepare('DELETE FROM events WHERE room_id=?').run(id)
   db.prepare('DELETE FROM messages WHERE room_id=?').run(id)
   return { messages: n, memoryCards: mem }
 }
