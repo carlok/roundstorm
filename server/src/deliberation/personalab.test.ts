@@ -153,3 +153,35 @@ test('re-running an arm reports the latest run, not the two fused together', () 
   assert.equal(rep.costUsd, 0.5, 'the earlier run\'s cost was counted')
   assert.equal(rep.conclusion, '', 'the latest run produced no card, so no conclusion is claimed')
 })
+
+test('a lab report with a priced and an unpriced arm does not call the unpriced one free', () => {
+  // Only Claude reports a cost. An arm on another brain stored NULL, which was
+  // summed as 0, so the comparison read "cost ranged $0.00 to $x" as if the
+  // second arm had been free.
+  const priced = room('priced'), unpriced = room('unpriced')
+  const run = (r: { id: string }) => db.createDeliberation({
+    roomId: r.id, mode: 'deliberation', rounds: 1, style: 'parallel', sealedOpening: false,
+    status: 'complete', currentRound: 1, question: 'q', tier: 'research',
+  } as never)
+  const say = (r: { id: string }, authorId: string, deliberationId: string, costUsd: number | null) =>
+    db.insertMessage({
+      roomId: r.id, authorType: 'agent', authorId, body: 'a few words here',
+      round: 1, deliberationId, stance: 'assert' as never, costUsd,
+    })
+  const d1 = run(priced.r), d2 = run(unpriced.r)
+  say(priced.r, priced.cast[0].id, d1.id, 0.4)
+  say(priced.r, priced.cast[1].id, d1.id, null)
+  say(unpriced.r, unpriced.cast[0].id, d2.id, null)
+
+  const a = reportArm(priced.r.id)!, b = reportArm(unpriced.r.id)!
+  assert.equal(a.costUsd, 0.4)
+  assert.equal(a.pricedTurns, 1)
+  assert.equal(a.turns, 2)
+  assert.equal(b.costUsd, null, 'an arm that reported no cost was summed as zero')
+  assert.equal(b.pricedTurns, 0)
+
+  const lines = compare([priced.r.id, unpriced.r.id]).observations.filter(l => /Cost/.test(l))
+  assert.equal(lines.length, 1)
+  assert.doesNotMatch(lines[0], /\$0\.00/, 'the unpriced arm was shown as $0.00')
+  assert.match(lines[0], /1 of 2 arms reported no cost/)
+})

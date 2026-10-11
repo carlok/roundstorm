@@ -116,6 +116,7 @@ async function main(): Promise<number> {
         turns: o.messages,
         failedTurns: o.failedTurns,
         costUsd: o.costUsd,
+        pricedTurns: o.pricedTurns,
         ms: o.ms,
       })), null, 2)
     : outcomes.map(renderOutcome).join('\n\n---\n\n')

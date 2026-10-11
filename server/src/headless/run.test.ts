@@ -14,7 +14,7 @@ import { join } from 'node:path'
 
 process.env.ROUNDSTORM_DATA = mkdtempSync(join(tmpdir(), 'rs-run-'))
 const db = await import('../db.ts')
-const { cardFor, exitCodeFor, runBatch, writeOutput, setupExperiment } = await import('./run.ts')
+const { cardFor, exitCodeFor, runBatch, writeOutput, setupExperiment, renderOutcome } = await import('./run.ts')
 type RunOutcome = Awaited<ReturnType<typeof import('./run.ts').runExperiment>>
 type Cfg = Parameters<typeof setupExperiment>[0]
 
@@ -25,10 +25,12 @@ const cfg = (over: Partial<Cfg> = {}): Cfg => ({
   ...over,
 } as Cfg)
 
-const outcome = (over: Partial<RunOutcome> = {}): RunOutcome => ({
+const baseOutcome = (over: Partial<RunOutcome> = {}): RunOutcome => ({
   room: { name: 'R' }, agents: [], card: { level: 'strong_consensus' }, messages: 3,
-  costUsd: 0, failedTurns: 0, ms: 1, ...over,
+  costUsd: null, pricedTurns: 0, failedTurns: 0, ms: 1, ...over,
 } as unknown as RunOutcome)
+
+const outcome = baseOutcome
 
 // --- the card must belong to this run ---
 
@@ -145,4 +147,15 @@ test('an unwritable output path is reported, not thrown', () => {
   mkdirSync(join(dir, 'isdir'))
   assert.ok(writeOutput(join(dir, 'isdir'), 'x'), 'writing onto a directory should be an error value')
   writeFileSync(join(dir, 'f'), '')
+})
+
+test('an unpriced run says its cost is unknown, not that it was free', () => {
+  const card = {
+    level: 'strong_consensus', conclusion: 'c', why: '', commonGround: [], disagreement: [],
+    alternatives: [], evidence: [], unknowns: [], nextSteps: [],
+  } as never
+  const outcome = (over: Partial<RunOutcome>) => baseOutcome({ card, ...over })
+  assert.match(renderOutcome(outcome({ costUsd: null, pricedTurns: 0 })), /cost n\/a/)
+  assert.match(renderOutcome(outcome({ costUsd: 0.25, pricedTurns: 3, messages: 3 })), /cost \$0\.250(?! )/)
+  assert.match(renderOutcome(outcome({ costUsd: 0.25, pricedTurns: 1, messages: 3 })), /at least \$0\.250 \(1 of 3 turns priced\)/)
 })

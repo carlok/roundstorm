@@ -13,13 +13,16 @@ import { LEVEL_LABEL } from '../deliberation/ledger.ts'
 import { renderCard } from '../deliberation/export.ts'
 import type { Agent, ResultCard, Room } from '../types.ts'
 import type { ExperimentConfig } from './config.ts'
+import { formatCost, sumCost } from '../deliberation/cost.ts'
 
 export interface RunOutcome {
   room: Room
   agents: Agent[]
   card: ResultCard | null
   messages: number
-  costUsd: number
+  /** Sum over turns that reported a cost; null when none did (not the same as free). */
+  costUsd: number | null
+  pricedTurns: number
   failedTurns: number
   ms: number
 }
@@ -123,13 +126,15 @@ export async function runExperiment(
 
   const messages = db.listMessages(room.id).filter(m => m.deliberationId === deliberation.id)
   const card = cardFor(room.id, deliberation.id)
+  const cost = sumCost(messages.filter(m => m.authorType === 'agent'))
 
   return {
     room: db.getRoom(room.id)!,
     agents,
     card,
     messages: messages.filter(m => m.authorType === 'agent').length,
-    costUsd: Number(messages.reduce((s, m) => s + (m.costUsd ?? 0), 0).toFixed(4)),
+    costUsd: cost.usd,
+    pricedTurns: cost.priced,
     // A turn that could not start is reported as a system message; counting them
     // separately stops a run that half-failed from looking like a clean result.
     failedTurns: messages.filter(m => m.authorType === 'system' && !m.body.startsWith('__result__')).length,
@@ -154,7 +159,7 @@ export function renderOutcome(o: RunOutcome): string {
     `# ${o.room.name}`,
     '',
     `${o.messages} turns · ${Math.round(o.ms / 1000)}s`
-      + (o.costUsd ? ` · $${o.costUsd.toFixed(3)}` : '')
+      + ` · cost ${formatCost({ usd: o.costUsd, priced: o.pricedTurns, turns: o.messages })}`
       + (o.failedTurns ? ` · ${o.failedTurns} turn(s) failed` : ''),
     '',
   ].join('\n')
@@ -204,7 +209,7 @@ export async function runBatch(
       say(`experiment ${i + 1} (${cfg.room.name}) failed: ${err instanceof Error ? err.message : String(err)}`)
       outcome = {
         room: db.listRooms().find(r => r.name === cfg.room.name) ?? ({ name: cfg.room.name } as Room),
-        agents: [], card: null, messages: 0, costUsd: 0, failedTurns: 0, ms: 0,
+        agents: [], card: null, messages: 0, costUsd: null, pricedTurns: 0, failedTurns: 0, ms: 0,
       }
     }
     outcomes.push(outcome)
