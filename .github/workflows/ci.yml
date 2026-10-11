@@ -33,6 +33,34 @@ jobs:
       - run: npm run typecheck
       - run: npm test
 
+  # Coverage on a clean runner, shown in the job summary. Informational: there is
+  # no threshold, because a number nobody chose would only train people to ignore
+  # a red build. The table is cut out of the test output between node's own
+  # start/end markers so the summary is not the whole test log.
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Run the suite with coverage
+        # shell: bash adds pipefail, so a failing suite still fails the job
+        # even though its output goes through tee.
+        shell: bash
+        run: npm run coverage 2>&1 | tee coverage.txt
+      - name: Publish the table
+        if: always()
+        run: |
+          {
+            echo '### Test coverage'
+            echo '```text'
+            sed -n '/start of coverage report/,/end of coverage report/p' coverage.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
   # The browser sweep: asks headless Chrome what a click on each control would
   # actually hit. macOS only, because it drives the built bundle with Meta+K and
   # the runner ships Chrome at the path the test defaults to.
