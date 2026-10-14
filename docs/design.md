@@ -302,6 +302,8 @@ the human's active steer                  ~always, verbatim, at the top
 the turn instruction (mode + round + role) ~always
 ```
 
+**As built:** there is no room digest yet. The transcript section is capped at 60,000 characters (`ROUNDSTORM_HISTORY_CHARS` to change it, minimum 2,000). Over the cap, the oldest messages are dropped and one marker says how many; the newest round and everything a human wrote are never dropped, and the ledger (rendered separately) still carries every position. The number omitted is recorded on each `turn.started` event. A summary of the dropped rounds is the obvious next step. At five agents and five rounds of ~1,800-character messages the cap does not bind (the transcript peaks near 38,000 characters); it starts to matter around eight rounds.
+
 And then — the trust feature — **"What did Alice see?"** on any message opens exactly the composed context that produced it, with token counts per section. Debugging a bad turn stops being guesswork. I know of no comparable tool that exposes this; it should be a signature of the product.
 
 ---

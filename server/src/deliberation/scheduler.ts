@@ -288,6 +288,7 @@ export async function runTurn(args: {
     payload: {
       round, brain: agent.brain, model: agent.model, tier,
       sections: ctx.sections,
+      omittedMessages: ctx.omittedMessages,
       systemPromptBytes: Buffer.byteLength(ctx.systemPrompt),
       userPromptBytes: Buffer.byteLength(ctx.userPrompt),
       promptDigest: createHash('sha256')

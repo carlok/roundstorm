@@ -152,3 +152,72 @@ test('an @mention tells the named agent to answer and everyone else to stay out'
   assert.ok(/addressed you by name/i.test(mine.userPrompt))
   assert.ok(/let them answer it/i.test(theirs.userPrompt))
 })
+
+// --- history budget (#33) ---
+
+const human = (id: string, body: string, round: number | null): Message =>
+  ({ ...msg(id, 'a-Alice', body, round), authorType: 'human', authorId: null })
+
+const compose = (history: Message[], historyBudget?: number, round = 4) => composeContext({
+  agent: roster[0], room, roster, deliberation: delib({ currentRound: round, rounds: 6 }),
+  round, history, steers: [], schemaEnforced: true, historyBudget,
+})
+
+/** Three rounds of two messages of about 1,000 characters each. */
+const long = () => [1, 2, 3].flatMap(r => ['Alice', 'Bruno'].map((n, i) =>
+  msg(`m${r}${i}`, `a-${n}`, `R${r}-${n} ` + 'x'.repeat(1000), r)))
+
+test('under the budget the transcript is untouched and nothing is reported omitted', () => {
+  const ctx = compose(long(), 100_000)
+  assert.equal(ctx.omittedMessages, 0)
+  assert.ok(!ctx.userPrompt.includes('omitted'))
+  for (const r of [1, 2, 3]) for (const n of ['Alice', 'Bruno']) assert.ok(ctx.userPrompt.includes(`R${r}-${n} `))
+})
+
+test('over the budget the oldest messages go, the newest round stays, and a marker says so', () => {
+  const ctx = compose(long(), 3_000)
+  assert.ok(ctx.omittedMessages > 0)
+  assert.ok(!ctx.userPrompt.includes('R1-Alice '), 'the oldest message was kept over budget')
+  assert.ok(ctx.userPrompt.includes('R3-Alice ') && ctx.userPrompt.includes('R3-Bruno '),
+    'the most recent round must never be dropped')
+  assert.match(ctx.userPrompt, /\[\d+ earlier messages? omitted/)
+  assert.match(ctx.userPrompt, /ledger above still records/)
+})
+
+test('the transcript section stays inside the budget when something can be dropped', () => {
+  const budget = 4_000
+  const ctx = compose(long(), budget)
+  const t = ctx.sections.find(s => s.name === 'transcript')!
+  assert.ok(t.chars <= budget + 400, `transcript was ${t.chars} chars against a ${budget} budget`)
+})
+
+test('a human message survives even when it is the oldest thing in the room', () => {
+  const history = [human('h1', 'HUMAN STEER ' + 'y'.repeat(500), 1), ...long()]
+  const ctx = compose(history, 3_000)
+  assert.ok(ctx.userPrompt.includes('HUMAN STEER'), 'a human message was dropped to save space')
+  assert.ok(!ctx.userPrompt.includes('R1-Alice '))
+})
+
+test('one marker stands for each run of omitted messages, in place', () => {
+  const ctx = compose(long(), 3_000)
+  const at = ctx.userPrompt.indexOf('omitted to keep')
+  assert.ok(at > 0)
+  assert.ok(at < ctx.userPrompt.indexOf('R3-Alice '), 'the marker should come before what survives')
+  assert.equal(ctx.userPrompt.match(/omitted to keep/g)!.length, 1)
+})
+
+test('trimming never lets in a round the caller excluded', () => {
+  // Round isolation is the property this file exists for.
+  const ctx = compose(long(), 3_000, 3)
+  assert.ok(!ctx.userPrompt.includes('ROUND FOUR'))
+  const withoutRound3 = long().filter(m => m.round !== 3)
+  const c2 = compose(withoutRound3, 2_500, 3)
+  assert.ok(!c2.userPrompt.includes('R3-'), 'a message from an excluded round appeared')
+})
+
+test('prompt size grows slowly once the budget binds', () => {
+  const make = (rounds: number) => Array.from({ length: rounds }, (_, i) => i + 1).flatMap(r =>
+    ['Alice', 'Bruno', 'Cara', 'Dev', 'Eli'].map((n, k) => msg(`m${r}${k}`, `a-${n}`, 'z'.repeat(1500), r)))
+  const sizeAt = (r: number) => compose(make(r), 12_000, r + 1).userPrompt.length
+  assert.ok(sizeAt(10) < sizeAt(3) * 2.2, 'prompt size still tracks the length of the discussion')
+})
