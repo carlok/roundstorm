@@ -15,13 +15,10 @@
  * tokens to ~2.3k, which at five agents times five rounds is the whole cost
  * profile of the product.
  */
-import { spawn } from 'node:child_process'
 import type { AdapterEvent, BrainAdapter, TurnRequest } from './types.ts'
 import type { Tier } from '../types.ts'
 import { isTier } from '../types.ts'
-import { resolveBin, spawnEnv } from './resolve.ts'
-import { checkCommandLine, needsShell } from './platform.ts'
-import { terminate, trackChild, untrackChild, which } from './spawn.ts'
+import { streamProcess, which, type StreamOpts } from './spawn.ts'
 
 const ALL_TOOLS = [
   'Task', 'Artifact', 'Bash', 'CronCreate', 'CronDelete', 'CronList', 'DesignSync',
@@ -85,7 +82,8 @@ export const claudeAdapter: BrainAdapter = {
 export const claudeToolsFor = (tier: string): readonly string[] =>
   isTier(tier) ? TIER_TOOLS[tier] : []
 
-async function* runClaude(req: TurnRequest, signal: AbortSignal): AsyncIterable<AdapterEvent> {
+/** The argv for one turn. Exported so a test can assert what each tier is granted. */
+export function claudeArgs(req: TurnRequest): string[] {
   const keep = new Set(claudeToolsFor(req.tier))
   const deny = ALL_TOOLS.filter(t => !keep.has(t))
 
@@ -101,130 +99,64 @@ async function* runClaude(req: TurnRequest, signal: AbortSignal): AsyncIterable<
   if (deny.length) args.push('--disallowed-tools', ...deny)
   if (req.model) args.push('--model', req.model)
   if (req.tier !== 'reasoning' && req.workingDir) args.push('--add-dir', req.workingDir)
+  return args
+}
 
-  const bin = resolveBin('claude')
-  if (!bin) {
-    yield {
-      type: 'error',
-      message: 'The claude CLI is not installed, or Roundstorm cannot find it.',
-    }
-    return
-  }
-
-  // claude is an npm package, so on Windows it resolves to claude.cmd and can
-  // only be launched through a shell — which also lowers the command-line
-  // ceiling to 8 KB, and the prompt is passed as an argument.
-  const viaShell = needsShell(bin, process.platform)
-  const length = checkCommandLine(bin, args, process.platform, viaShell)
-  if (!length.ok) {
-    yield { type: 'error', message: length.message! }
-    return
-  }
-
-  const child = spawn(bin, args, {
-    cwd: req.workingDir ?? undefined,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    env: spawnEnv({ CLAUDE_CODE_ENTRYPOINT: 'roundstorm' }),
-    shell: viaShell,
-    windowsHide: true,
-  })
-
-  trackChild(child)
-  const onAbort = () => terminate(child)
-  signal.addEventListener('abort', onAbort, { once: true })
-
-  const queue: AdapterEvent[] = []
-  let resolveNext: (() => void) | null = null
-  let done = false
-  let stderr = ''
-
-  const push = (e: AdapterEvent) => {
-    queue.push(e)
-    resolveNext?.()
-    resolveNext = null
-  }
-
+/**
+ * Turns Claude Code's stream-json lines into AdapterEvents. Separate from the
+ * process handling so it can be tested with recorded lines; the pump itself
+ * (spawn, newline framing, the unterminated last line, abort, the registry of
+ * live children) is the shared `streamProcess`.
+ */
+export function claudeTranslator(): Pick<StreamOpts, 'onLine' | 'onClose'> {
   let structured: unknown = null
   let text = ''
   let costUsd: number | undefined
-  let buf = ''
 
-  /** One NDJSON event. Named so `close` can replay a line with no trailing newline. */
-  const handleLine = (ev: any) => {
-    if (ev.type === 'system' && ev.subtype === 'thinking_tokens') {
-      push({ type: 'activity', text: 'Thinking' })
-    } else if (ev.type === 'assistant' && ev.message?.content) {
-      for (const block of ev.message.content) {
-        if (block.type === 'text' && block.text) {
-          // Append. Assigning kept only the last block, so a reply split across
-          // several — which is what happens whenever a tool call sits in the
-          // middle of the response — silently lost everything before it.
-          text += block.text
-          push({ type: 'delta', text: block.text })
-        } else if (block.type === 'tool_use') {
-          if (block.name === 'StructuredOutput') structured = block.input
-          push({
-            type: 'tool',
-            name: block.name,
-            detail: HUMAN_TOOL_LABEL[block.name] ?? `Using ${block.name}`,
-          })
+  return {
+    onLine(line, push) {
+      const ev = line as any
+      if (ev.type === 'system' && ev.subtype === 'thinking_tokens') {
+        push({ type: 'activity', text: 'Thinking' })
+      } else if (ev.type === 'assistant' && ev.message?.content) {
+        for (const block of ev.message.content) {
+          if (block.type === 'text' && block.text) {
+            // Append. Assigning kept only the last block, so a reply split across
+            // several — which is what happens whenever a tool call sits in the
+            // middle of the response — silently lost everything before it.
+            text += block.text
+            push({ type: 'delta', text: block.text })
+          } else if (block.type === 'tool_use') {
+            if (block.name === 'StructuredOutput') structured = block.input
+            push({
+              type: 'tool',
+              name: block.name,
+              detail: HUMAN_TOOL_LABEL[block.name] ?? `Using ${block.name}`,
+            })
+          }
         }
+      } else if (ev.type === 'system' && ev.subtype === 'permission_denied') {
+        push({ type: 'activity', text: `Blocked: ${ev.tool_name}` })
+      } else if (typeof ev.total_cost_usd === 'number') {
+        costUsd = ev.total_cost_usd
+        if (ev.is_error) push({ type: 'error', message: ev.result || 'claude reported an error' })
       }
-    } else if (ev.type === 'system' && ev.subtype === 'permission_denied') {
-      push({ type: 'activity', text: `Blocked: ${ev.tool_name}` })
-    } else if (typeof ev.total_cost_usd === 'number') {
-      costUsd = ev.total_cost_usd
-      if (ev.is_error) push({ type: 'error', message: ev.result || 'claude reported an error' })
-    }
-  }
+    },
 
-  child.stdout.setEncoding('utf8')
-  child.stdout.on('data', chunk => {
-    buf += chunk
-    let nl: number
-    while ((nl = buf.indexOf('\n')) !== -1) {
-      const line = buf.slice(0, nl).trim()
-      buf = buf.slice(nl + 1)
-      if (!line) continue
-      let ev: any
-      try { ev = JSON.parse(line) } catch { continue }
-      handleLine(ev)
-    }
-  })
-
-  child.stderr.setEncoding('utf8')
-  child.stderr.on('data', d => { stderr += d })
-
-  child.on('error', err => {
-    untrackChild(child)
-    push({ type: 'error', message: `spawn failed: ${err.message}` })
-    done = true
-    resolveNext?.()
-  })
-
-  child.on('close', code => {
-    untrackChild(child)
-    const tail = buf.trim()
-    buf = ''
-    if (tail) { try { handleLine(JSON.parse(tail)) } catch { /* not our line */ } }
-    if (code !== 0 && code !== null && !structured && !text) {
-      push({ type: 'error', message: stderr.trim().slice(0, 500) || `claude exited ${code}` })
-    } else {
-      push({ type: 'final', structured, text, costUsd })
-    }
-    done = true
-    resolveNext?.()
-  })
-
-  try {
-    while (true) {
-      while (queue.length) yield queue.shift()!
-      if (done) break
-      await new Promise<void>(r => { resolveNext = r })
-    }
-  } finally {
-    signal.removeEventListener('abort', onAbort)
-    terminate(child)
+    onClose(code, stderr, push) {
+      if (code !== 0 && code !== null && !structured && !text) {
+        push({ type: 'error', message: stderr.trim().slice(0, 500) || `claude exited ${code}` })
+      } else {
+        push({ type: 'final', structured, text, costUsd })
+      }
+    },
   }
 }
 
+function runClaude(req: TurnRequest, signal: AbortSignal): AsyncIterable<AdapterEvent> {
+  return streamProcess('claude', claudeArgs(req), signal, {
+    cwd: req.workingDir ?? undefined,
+    env: { CLAUDE_CODE_ENTRYPOINT: 'roundstorm' },
+    ...claudeTranslator(),
+  })
+}
