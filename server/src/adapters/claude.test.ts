@@ -114,3 +114,36 @@ test('a model is passed only when one is chosen', () => {
   const a = claudeArgs(req({ model: 'm-1' }))
   assert.equal(a[a.indexOf('--model') + 1], 'm-1')
 })
+
+// --- tool grants ---
+
+const toolsArg = (tier: TurnRequest['tier']) => {
+  const a = claudeArgs(req({ tier }))
+  return a[a.indexOf('--tools') + 1]
+}
+
+test('reasoning grants no tools, and says so with an explicit empty allow-list', () => {
+  const a = claudeArgs(req({ tier: 'reasoning' }))
+  assert.ok(a.includes('--tools'), 'without --tools the CLI grants its default toolset')
+  assert.equal(toolsArg('reasoning'), '')
+})
+
+test('no tier uses a deny-list, so an unknown tool is never available by default', () => {
+  for (const tier of ['reasoning', 'research', 'workstation', 'full'] as const) {
+    const a = claudeArgs(req({ tier }))
+    assert.ok(!a.some(x => /disallowed/i.test(x) || /^--allowed/i.test(x)), tier)
+  }
+})
+
+test('each tier grants exactly its own tools', () => {
+  assert.equal(toolsArg('research'), 'WebSearch,WebFetch')
+  assert.equal(toolsArg('workstation'), 'WebSearch,WebFetch,Read,Glob,Grep')
+  assert.equal(toolsArg('full'), 'WebSearch,WebFetch,Read,Glob,Grep,Write,Edit,Bash,NotebookEdit')
+})
+
+test('an unrecognised tier is granted nothing', () => {
+  for (const t of ['workstation ', 'Full', '__proto__', '']) {
+    const a = claudeArgs(req({ tier: t as never }))
+    assert.equal(a[a.indexOf('--tools') + 1], '', JSON.stringify(t))
+  }
+})

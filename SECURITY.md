@@ -52,9 +52,6 @@ more than it should.
   running an unreviewed program.
 - **No approval prompt** before a destructive tool call. An earlier design called
   for one; it is not implemented, and `docs/design.md` §9 says so.
-- **Claude's tool gating is a deny-list**, built by subtracting from a hardcoded
-  snapshot of tool names. A tool that CLI gains later is not in that list and so is
-  not denied.
 - **Agent output is not trusted content.** It is rendered as Markdown with HTML
   escaped, but it comes from models that read the web.
 
