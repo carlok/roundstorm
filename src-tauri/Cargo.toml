@@ -12,7 +12,7 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-plugin-shell = "2"
 # A per-launch secret for the daemon. 0.3 is already in the lockfile via tauri.
-getrandom = "0.3"
+getrandom = "0.4"
 
 [profile.release]
 strip = true
