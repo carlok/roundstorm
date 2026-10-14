@@ -12,11 +12,17 @@ import { checkCommandLine, needsShell } from './platform.ts'
  * parent there leaves its children running, so the tree has to be taken down
  * explicitly or a cancelled turn keeps burning tokens invisibly.
  *
- * Known limit on Unix: this signals the direct child only. A CLI that leaves an
- * orphaned grandchild behind would survive, and taking the whole group down needs
- * `detached: true` plus `kill(-pid)` — a change to process-group semantics that
- * wants a real brain run to verify, not a unit test. Untested either way, so it
- * is recorded here rather than assumed solved.
+ * On Unix every brain is spawned `detached`, which makes it the leader of its own
+ * process group, and the whole group is signalled with `kill(-pid)`. Signalling
+ * the pid alone left whatever the CLI had spawned running after a cancel or an
+ * app quit. A child that is not a group leader (a caller that forgot `detached`)
+ * makes `kill(-pid)` fail with ESRCH and falls back to the direct signal, so this
+ * can never reach the daemon's own group.
+ *
+ * Side effect of `detached`: a terminal Ctrl-C no longer reaches brains by
+ * itself. Every entry point that can be interrupted ends them explicitly
+ * (`terminateAll` from the daemon's shutdown and from the CLI's SIGINT handler).
+ * Only SIGTERM is sent; a grandchild that ignores it would survive.
  */
 export function terminate(child: { pid?: number; killed: boolean; kill: (s?: NodeJS.Signals) => boolean }): void {
   if (child.killed || !child.pid) return
@@ -26,6 +32,10 @@ export function terminate(child: { pid?: number; killed: boolean; kill: (s?: Nod
       return
     } catch { /* fall through to the best Node can do */ }
   }
+  try {
+    process.kill(-child.pid, 'SIGTERM')
+    return
+  } catch { /* not a group leader, or already gone */ }
   try { child.kill('SIGTERM') } catch { /* already gone */ }
 }
 
@@ -107,6 +117,9 @@ export async function* streamProcess(
     env: { ...spawnEnv(), ...(opts.env ?? {}) },
     shell: viaShell,
     windowsHide: true,
+    // Own process group, so `terminate` can take the whole tree down. Not on
+    // Windows, where `detached` opens a console window and taskkill /T does it.
+    detached: process.platform !== 'win32',
   })
 
   trackChild(child)
@@ -196,6 +209,7 @@ export function capture(cmd: string, args: string[], timeoutMs = 25_000): Promis
       env: spawnEnv(),
       shell: needsShell(bin, process.platform),
       windowsHide: true,
+      detached: process.platform !== 'win32',
     })
     let out = ''
     const timer = setTimeout(() => { terminate(p); resolve(out) }, timeoutMs)
