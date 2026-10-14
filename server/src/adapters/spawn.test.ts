@@ -7,6 +7,9 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdtempSync, readFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { streamProcess, terminateAll, liveChildCount } from './spawn.ts'
 import type { AdapterEvent } from './types.ts'
 
@@ -65,3 +68,41 @@ test('terminateAll ends a brain the daemon is still holding', async () => {
   assert.equal(liveChildCount(), 0)
   await run
 })
+
+// --- process groups (#29) ---
+
+const alive = (pid: number) => { try { process.kill(pid, 0); return true } catch { return false } }
+const until = async (ok: () => boolean, ms = 5000) => {
+  for (const end = Date.now() + ms; !ok() && Date.now() < end;) await new Promise(r => setTimeout(r, 25))
+  return ok()
+}
+
+for (const how of ['abort', 'terminateAll'] as const) {
+  test(`a cancel (${how}) takes the brain's own children down with it`, { skip: process.platform === 'win32' }, async () => {
+    // A brain CLI that spawns helpers — claude runs node, codex runs git. SIGTERM to
+    // the brain's pid alone left those running against the user's account.
+    const dir = mkdtempSync(join(tmpdir(), 'rs-pg-'))
+    const pids = join(dir, 'pids')
+    const ac = new AbortController()
+    const run = (async () => {
+      for await (const _e of streamProcess('sh',
+        ['-c', `sleep 60 & echo $! > ${pids}; echo $$ >> ${pids}; wait`], ac.signal,
+        { onLine: () => {}, onClose: () => {} })) { /* drain */ }
+    })()
+
+    const read = () => { try { return readFileSync(pids, 'utf8').trim().split('\n').map(Number) } catch { return [] } }
+    assert.ok(await until(() => read().length === 2), 'the fixture never started its grandchild')
+    const [grandchild, child] = read()
+    assert.ok(alive(grandchild) && alive(child))
+
+    if (how === 'abort') ac.abort(); else terminateAll()
+    // Not awaiting `run` first: if the grandchild survives it holds the stdout
+    // pipe open, the stream never closes, and the test would hang instead of fail.
+    const childGone = await until(() => !alive(child))
+    const grandchildGone = await until(() => !alive(grandchild))
+    if (!grandchildGone) try { process.kill(grandchild, 'SIGKILL') } catch { /* gone */ }
+    assert.ok(childGone, 'the brain process survived')
+    assert.ok(grandchildGone, 'the brain\'s own child survived the cancel')
+    await run
+  })
+}
