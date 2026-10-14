@@ -15,8 +15,23 @@
 import { db, now } from '../db.ts'
 import type { Message } from '../types.ts'
 
-const BASE = process.env.ROUNDSTORM_EMBED_URL ?? 'http://127.0.0.1:1234/v1'
-const MODEL = process.env.ROUNDSTORM_EMBED_MODEL ?? 'text-embedding-nomic-embed-text-v1.5'
+// Read on use, not at import: the model is part of what makes a stored vector
+// comparable, and a test (or a restart with a changed setting) must see it.
+const baseUrl = () => process.env.ROUNDSTORM_EMBED_URL ?? 'http://127.0.0.1:1234/v1'
+const embedModel = () => process.env.ROUNDSTORM_EMBED_MODEL ?? 'text-embedding-nomic-embed-text-v1.5'
+
+/**
+ * Messages that can be indexed and are not yet, under the CURRENT model.
+ *
+ *  - Unrevealed sealed messages are excluded (they may not be searchable yet).
+ *  - So are messages with no text: there is nothing to embed, so they would stay
+ *    "pending" forever and the count would never drain.
+ *  - A row stored under a different model does not count as indexed. Two models'
+ *    vectors are not comparable even at the same dimension, so those rows are
+ *    pending again and `indexPending` re-embeds them.
+ */
+const PENDING_WHERE = `m.sealed = 0 AND m.author_type != 'system' AND TRIM(m.body) != ''
+  AND NOT EXISTS (SELECT 1 FROM embeddings e WHERE e.message_id = m.id AND e.model = ?)`
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS embeddings (
@@ -40,20 +55,19 @@ export interface EmbedderStatus {
 }
 
 export async function embedderStatus(): Promise<EmbedderStatus> {
-  const indexed = (db.prepare('SELECT COUNT(*) AS c FROM embeddings').get() as any).c
-  const pending = (db.prepare(`SELECT COUNT(*) AS c FROM messages m
-    WHERE m.sealed = 0 AND m.author_type != 'system'
-      AND NOT EXISTS (SELECT 1 FROM embeddings e WHERE e.message_id = m.id)`).get() as any).c
+  const model = embedModel()
+  const indexed = (db.prepare('SELECT COUNT(*) AS c FROM embeddings WHERE model = ?').get(model) as any).c
+  const pending = (db.prepare(`SELECT COUNT(*) AS c FROM messages m WHERE ${PENDING_WHERE}`).get(model) as any).c
   return {
     available: await reachable(),
-    model: MODEL, baseUrl: BASE, indexed, pending,
+    model, baseUrl: baseUrl(), indexed, pending,
     note: 'Runs entirely on this machine. Nothing is sent anywhere.',
   }
 }
 
 async function reachable(): Promise<boolean> {
   try {
-    const res = await fetch(`${BASE}/models`, { signal: AbortSignal.timeout(2000) })
+    const res = await fetch(`${baseUrl()}/models`, { signal: AbortSignal.timeout(2000) })
     return res.ok
   } catch {
     return false
@@ -61,10 +75,10 @@ async function reachable(): Promise<boolean> {
 }
 
 async function embed(texts: string[]): Promise<Float32Array[]> {
-  const res = await fetch(`${BASE}/embeddings`, {
+  const res = await fetch(`${baseUrl()}/embeddings`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ model: MODEL, input: texts }),
+    body: JSON.stringify({ model: embedModel(), input: texts }),
     signal: AbortSignal.timeout(120_000),
   })
   if (!res.ok) throw new Error(`embedder ${res.status}: ${(await res.text()).slice(0, 200)}`)
@@ -93,10 +107,10 @@ function normalise(v: Float32Array): Float32Array {
 export async function indexPending(limit = 400): Promise<{ indexed: number; skipped: boolean }> {
   if (!await reachable()) return { indexed: 0, skipped: true }
 
+  const model = embedModel()
   const rows = db.prepare(`SELECT m.id, m.room_id, m.body FROM messages m
-    WHERE m.sealed = 0 AND m.author_type != 'system'
-      AND NOT EXISTS (SELECT 1 FROM embeddings e WHERE e.message_id = m.id)
-    ORDER BY m.seq LIMIT ?`).all(limit) as any[]
+    WHERE ${PENDING_WHERE}
+    ORDER BY m.seq LIMIT ?`).all(model, limit) as any[]
   if (!rows.length) return { indexed: 0, skipped: false }
 
   const insert = db.prepare(`INSERT OR REPLACE INTO embeddings
@@ -115,7 +129,7 @@ export async function indexPending(limit = 400): Promise<{ indexed: number; skip
     for (let j = 0; j < batch.length; j++) {
       const v = vecs[j]
       if (!v) continue
-      insert.run(batch[j].id, batch[j].room_id, MODEL, v.length, Buffer.from(v.buffer), now())
+      insert.run(batch[j].id, batch[j].room_id, model, v.length, Buffer.from(v.buffer), now())
       done++
     }
   }
@@ -133,7 +147,9 @@ export interface SemanticHit {
   snippet: string
 }
 
-export async function semanticSearch(query: string, limit = 25): Promise<SemanticHit[] | null> {
+export async function semanticSearch(
+  query: string, limit = 25, opts: { roomId?: string } = {},
+): Promise<SemanticHit[] | null> {
   if (query.trim().length < 3) return []
   if (!await reachable()) return null
 
@@ -145,24 +161,30 @@ export async function semanticSearch(query: string, limit = 25): Promise<Semanti
   }
   if (!qv) return null
 
-  const rows = db.prepare(`SELECT e.message_id, e.room_id, e.dim, e.vec, r.name AS room_name
-    FROM embeddings e JOIN rooms r ON r.id = e.room_id`).all() as any[]
+  // Only vectors from the current model are comparable with the query's, and
+  // rows are streamed and reduced to the best `limit` as they arrive, so the
+  // scan holds one vector at a time instead of every embedding in the database.
+  const rows = db.prepare(`SELECT e.message_id, e.dim, e.vec, r.name AS room_name
+    FROM embeddings e JOIN rooms r ON r.id = e.room_id
+    WHERE e.model = ? ${opts.roomId ? 'AND e.room_id = ?' : ''}`)
+    .iterate(...(opts.roomId ? [embedModel(), opts.roomId] : [embedModel()])) as Iterable<any>
 
-  const scored: { id: string; score: number; roomName: string }[] = []
+  let best: { id: string; score: number; roomName: string }[] = []
   for (const row of rows) {
-    const v = new Float32Array(
-      row.vec.buffer, row.vec.byteOffset, row.dim)
+    const v = new Float32Array(row.vec.buffer, row.vec.byteOffset, row.dim)
     if (v.length !== qv.length) continue
     let dot = 0
     for (let i = 0; i < v.length; i++) dot += v[i] * qv[i]
-    scored.push({ id: row.message_id, score: dot, roomName: row.room_name })
+    if (best.length < limit || dot > best[best.length - 1].score) {
+      best.push({ id: row.message_id, score: dot, roomName: row.room_name })
+      best.sort((a, b) => b.score - a.score)
+      if (best.length > limit) best.length = limit
+    }
   }
-
-  scored.sort((a, b) => b.score - a.score)
 
   const get = db.prepare('SELECT * FROM messages WHERE id=?')
   const hits: SemanticHit[] = []
-  for (const s of scored.slice(0, limit)) {
+  for (const s of best) {
     const row = get.get(s.id) as any
     if (!row) continue
     hits.push({

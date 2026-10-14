@@ -28,6 +28,7 @@ export function openNodeSqlite(path: string): SqliteDatabase {
     },
     get: (...p) => plain(stmt.get(...(p as never[]))),
     all: (...p) => (stmt.all(...(p as never[])) as unknown[]).map(plain),
+    iterate: function* (...p) { for (const row of stmt.iterate(...(p as never[]))) yield plain(row) },
   })
 
   return {
