@@ -78,6 +78,8 @@ export interface ComposedContext {
   systemPrompt: string
   userPrompt: string
   sections: { name: string; chars: number }[]
+  /** Transcript messages left out to stay inside the history budget. */
+  omittedMessages: number
 }
 
 export function composeContext(args: {
@@ -91,6 +93,8 @@ export function composeContext(args: {
   schemaEnforced: boolean
   extraInstruction?: string
   mentioned?: boolean
+  /** Characters of transcript allowed; defaults to HISTORY_BUDGET_CHARS. */
+  historyBudget?: number
 }): ComposedContext {
   const { agent, room, roster, deliberation, round, history, steers, schemaEnforced } = args
   const persona = personaByKey(agent.personaKey)
@@ -141,7 +145,8 @@ export function composeContext(args: {
   const memory = add('memory', renderMemory(agent, room.projectId))
   const ledger = add('ledger', renderLedger(room.id, roster, deliberation.id))
   const sources = add('sources', renderSources(room.id))
-  const transcript = add('transcript', renderHistory(history, roster))
+  const rendered = renderHistory(history, roster, args.historyBudget ?? HISTORY_BUDGET_CHARS)
+  const transcript = add('transcript', rendered.text)
   const steerText = add('steer', steers.length
     ? [`# PRIORITY — from the human researcher`,
        ...steers.map(s => s.body.trim()),
@@ -177,7 +182,7 @@ If you are abandoning something you argued for earlier, set your stance to "conc
   const userPrompt = [header, memory, ledger, sources, transcript, steerText, instruction]
     .filter(s => s.trim()).join('\n\n---\n\n')
 
-  return { systemPrompt, userPrompt, sections }
+  return { systemPrompt, userPrompt, sections, omittedMessages: rendered.omitted }
 }
 
 /** Accepted cards only. Proposals live in the inbox until a human keeps them. */
@@ -204,26 +209,87 @@ function renderSources(roomId: string): string {
     ...sources.map(s => `- **${s.label}** ${s.title}${s.url ? ` — ${s.url}` : ''}`)].join('\n')
 }
 
-function renderHistory(history: Message[], roster: Agent[]): string {
-  if (!history.length) return ''
+/**
+ * How much transcript one turn may carry, in characters (about a quarter as many
+ * tokens). Every turn re-sends the whole discussion, so n agents over r rounds is
+ * n·r turns each carrying up to n·r messages: without a cap, cost grows with the
+ * square of the room's length. Override with ROUNDSTORM_HISTORY_CHARS.
+ */
+export const HISTORY_BUDGET_CHARS = (() => {
+  const n = Number(process.env.ROUNDSTORM_HISTORY_CHARS)
+  return Number.isFinite(n) && n >= 2_000 ? Math.floor(n) : 60_000
+})()
+
+interface Rendered { text: string; omitted: number }
+
+function renderMessage(m: Message, nameOf: (m: Message) => string): string[] {
+  const lines: string[] = []
+  const reply = m.replyTo ? ` (replying to ${m.replyTo})` : ''
+  lines.push(`### ${nameOf(m)} [id: ${m.id}]${reply}`)
+  lines.push(m.body.trim())
+  if (m.claims.length) {
+    lines.push('', 'Claims: ' + m.claims.map(c => `[${c.basis}] ${c.text}`).join(' | '))
+  }
+  lines.push('')
+  return lines
+}
+
+/**
+ * Render the discussion within a budget.
+ *
+ * Under the budget the output is the whole transcript, unchanged. Over it, the
+ * oldest messages are dropped and one visible marker stands where they were, so
+ * the agent knows it is not seeing everything. Two things are never dropped:
+ * anything from the most recent round (it is what the agent is answering) and
+ * anything a human wrote (their steers outrank the rest). The ledger is rendered
+ * separately and still carries every position the omitted messages raised.
+ *
+ * Only removes. Nothing is added from a round the caller excluded, so round
+ * isolation is untouched.
+ */
+export function renderHistoryWithin(history: Message[], roster: Agent[], budget: number): Rendered {
+  if (!history.length) return { text: '', omitted: 0 }
   const nameOf = (m: Message) =>
     m.authorType === 'human' ? 'Human researcher'
       : roster.find(a => a.id === m.authorId)?.name ?? 'Unknown'
 
+  const blocks = history.map(m => renderMessage(m, nameOf).join('\n'))
+  const size = (i: number) => blocks[i].length + 1
+  let used = blocks.reduce((n, _b, i) => n + size(i), 0)
+
+  const keep = new Set<number>(history.map((_m, i) => i))
+  const rounds = history.map(m => m.round).filter((r): r is number => r != null)
+  const newest = rounds.length ? Math.max(...rounds) : null
+  const pinned = (m: Message) => m.authorType === 'human' || (newest != null && m.round === newest)
+
+  for (let i = 0; i < history.length && used > budget; i++) {
+    if (pinned(history[i])) continue
+    keep.delete(i)
+    used -= size(i)
+  }
+
   const lines = ['# Discussion so far', '']
   let lastRound: number | null = null
-  for (const m of history) {
+  let omittedRun = 0
+  let omitted = 0
+  const flush = () => {
+    if (!omittedRun) return
+    lines.push(`[${omittedRun} earlier message${omittedRun === 1 ? '' : 's'} omitted to keep this prompt a manageable size. The ledger above still records every position they raised.]`, '')
+    omittedRun = 0
+  }
+  history.forEach((m, i) => {
+    if (!keep.has(i)) { omittedRun++; omitted++; return }
+    flush()
     if (m.round !== lastRound && m.round != null) {
       lines.push(`## Round ${m.round}`, '')
       lastRound = m.round
     }
-    const reply = m.replyTo ? ` (replying to ${m.replyTo})` : ''
-    lines.push(`### ${nameOf(m)} [id: ${m.id}]${reply}`)
-    lines.push(m.body.trim())
-    if (m.claims.length) {
-      lines.push('', 'Claims: ' + m.claims.map(c => `[${c.basis}] ${c.text}`).join(' | '))
-    }
-    lines.push('')
-  }
-  return lines.join('\n')
+    lines.push(blocks[i])
+  })
+  flush()
+  return { text: lines.join('\n'), omitted }
+}
+
+function renderHistory(history: Message[], roster: Agent[], budget: number): Rendered {
+  return renderHistoryWithin(history, roster, budget)
 }
