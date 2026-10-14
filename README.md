@@ -430,7 +430,7 @@ Each of these cost a failed run to discover, and each is commented at the call s
 
 | Brain | Quirk |
 |---|---|
-| `claude` | `--json-schema` is a `StructuredOutput` **tool**; `--disallowed-tools '*'` denies it and the turn dies |
+| `claude` | `--json-schema` is a `StructuredOutput` **tool**; `--disallowed-tools '*'` denies it and the turn dies; `--tools` allow-lists around it |
 | `codex` | stdin must be closed or `exec` blocks forever; `--ignore-user-config` does *not* stop skills loading (only a clean `CODEX_HOME` does); schema must be OpenAI **strict** mode — every property required, or a hard 400 |
 | `agy` | appends its own `toolAction`/`toolSummary` keys, so the schema must not say `additionalProperties: false`; emits prose *then* JSON |
 | `cursor-agent` | no schema flag at all; refuses to start in an untrusted directory; omitting `--model` inherits the user's configured model rather than `auto` |
@@ -443,13 +443,14 @@ and reads as a dead agent.
 ### Why the Claude flags look like that
 
 `server/src/adapters/claude.ts` runs with `--setting-sources '' --strict-mcp-config
---system-prompt <persona> --disallowed-tools <explicit list>`.
+--system-prompt <persona> --tools <allow-list for the tier>`.
 
 Measured, not guessed:
 
 - `--json-schema` is implemented as a `StructuredOutput` tool the model must call,
   so `--disallowed-tools '*'` denies the very mechanism the turn contract depends on
-  and the run burns four turns failing. The deny list must be explicit.
+  and the run burns four turns failing. `--tools` is an allow-list and leaves it
+  reachable; `--tools ""` is "no tools" and a tool added later is off by default.
 - Without `--setting-sources ''` the agent inherits your global CLAUDE.md, hooks,
   skills and MCP servers.
 - Trimming the advertised toolset takes a turn from ~18,700 input tokens to ~2,300.

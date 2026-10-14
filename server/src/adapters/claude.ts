@@ -6,29 +6,28 @@
  *   --setting-sources ''   no user hooks, no global CLAUDE.md, no skills
  *   --strict-mcp-config    no MCP servers
  *   --system-prompt        replaces Claude Code's default prompt with the persona
- *   --disallowed-tools     an explicit list, NOT '*'
+ *   --tools                an allow-list per tier; empty means no tools at all
  *
- * That last one matters twice over. `--json-schema` is implemented as a
- * StructuredOutput tool the model must call, so `--disallowed-tools '*'` denies
- * the very mechanism the contract depends on and the run burns four turns
- * failing. And trimming the advertised toolset takes a turn from ~18.7k input
- * tokens to ~2.3k, which at five agents times five rounds is the whole cost
- * profile of the product.
+ * That last one matters twice over. It is an allow-list, so a tool the CLI gains
+ * in a later release is unavailable until someone grants it, instead of being
+ * available at every tier (which is what the earlier deny-list did).
+ * `--json-schema` is implemented as a StructuredOutput tool the model must call;
+ * `--tools` leaves it reachable, where `--disallowed-tools '*'` denied it and
+ * burned four turns failing. And trimming the advertised toolset takes a turn
+ * from ~18.7k input tokens to ~2.3k, which at five agents times five rounds is
+ * the whole cost profile of the product.
  */
 import type { AdapterEvent, BrainAdapter, TurnRequest } from './types.ts'
 import type { Tier } from '../types.ts'
 import { isTier } from '../types.ts'
 import { streamProcess, which, type StreamOpts } from './spawn.ts'
 
-const ALL_TOOLS = [
-  'Task', 'Artifact', 'Bash', 'CronCreate', 'CronDelete', 'CronList', 'DesignSync',
-  'Edit', 'EnterWorktree', 'ExitWorktree', 'Glob', 'Grep', 'ListAgents', 'Monitor',
-  'NotebookEdit', 'PushNotification', 'Read', 'RemoteTrigger', 'ReportFindings',
-  'ScheduleWakeup', 'SendMessage', 'Skill', 'TaskCreate', 'TaskGet', 'TaskList',
-  'TaskOutput', 'TaskStop', 'TaskUpdate', 'ToolSearch', 'WebFetch', 'WebSearch', 'Write',
-]
-
-/** Tools each tier keeps. StructuredOutput is never denied — it carries the contract. */
+/**
+ * Tools each tier is granted, passed to `--tools` as an allow-list. Anything not
+ * named here, including a tool a later Claude Code release adds, is unavailable.
+ * StructuredOutput needs no entry: `--json-schema` adds it on its own, which was
+ * checked against the installed CLI (`--tools ""` still lists exactly it).
+ */
 const TIER_TOOLS: Record<Tier, string[]> = {
   reasoning: [],
   research: ['WebSearch', 'WebFetch'],
@@ -84,9 +83,6 @@ export const claudeToolsFor = (tier: string): readonly string[] =>
 
 /** The argv for one turn. Exported so a test can assert what each tier is granted. */
 export function claudeArgs(req: TurnRequest): string[] {
-  const keep = new Set(claudeToolsFor(req.tier))
-  const deny = ALL_TOOLS.filter(t => !keep.has(t))
-
   const args = [
     '-p', req.userPrompt,
     '--output-format', 'stream-json',
@@ -95,8 +91,10 @@ export function claudeArgs(req: TurnRequest): string[] {
     '--strict-mcp-config',
     '--system-prompt', req.systemPrompt,
     '--json-schema', JSON.stringify(req.schema),
+    // Always present, and an empty string at the reasoning tier: omitting the
+    // flag would grant the CLI's whole default toolset.
+    '--tools', claudeToolsFor(req.tier).join(','),
   ]
-  if (deny.length) args.push('--disallowed-tools', ...deny)
   if (req.model) args.push('--model', req.model)
   if (req.tier !== 'reasoning' && req.workingDir) args.push('--add-dir', req.workingDir)
   return args
