@@ -16,6 +16,8 @@ export interface Statement {
   run(...params: unknown[]): RunResult
   get(...params: unknown[]): unknown
   all(...params: unknown[]): unknown[]
+  /** Rows one at a time, for scans too large to hold in memory. */
+  iterate(...params: unknown[]): Iterable<unknown>
 }
 
 export interface SqliteDatabase {

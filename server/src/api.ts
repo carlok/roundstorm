@@ -132,7 +132,8 @@ export function makeApi() {
     const q = typeof req.query.q === 'string' ? req.query.q : ''
     const [keyword, semantic] = await Promise.all([
       Promise.resolve(db.searchMessages(q)),
-      req.query.semantic === '0' ? Promise.resolve(null) : semanticSearch(q),
+      req.query.semantic === '0' ? Promise.resolve(null)
+        : semanticSearch(q, 25, { roomId: typeof req.query.roomId === 'string' ? req.query.roomId : undefined }),
     ])
     res.json({ hits: keyword, semantic })
   })
