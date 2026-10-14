@@ -205,7 +205,7 @@ Four CLIs and one HTTP API, verified against what is actually installed on this 
 
 | Brain | Binary / version | Print mode | Structured output | Streaming | Workspace scope | Sandbox / permissions |
 |---|---|---|---|---|---|---|
-| Claude Code | `claude` 2.1.237 | `-p` | `--json-schema <schema>` | `--output-format stream-json` | `--add-dir` | `--allowed-tools` / `--disallowed-tools`, `--dangerously-skip-permissions` |
+| Claude Code | `claude` 2.1.237 | `-p` | `--json-schema <schema>` | `--output-format stream-json` | `--add-dir` | `--tools` (allow-list), `--allowed-tools` / `--disallowed-tools`, `--dangerously-skip-permissions` |
 | Antigravity | `agy` 1.1.19 | `-p` / `--print` | `--json-schema <schema\|file>` | `--output-format stream-json` | `--add-dir` (repeatable) | `--sandbox`, `--mode accept-edits\|plan`, `--dangerously-skip-permissions` |
 | Codex | `codex` 0.149.0 | `codex exec` | `--output-schema <file>` | `--json` (JSONL) | `-C/--cd`, `--add-dir` | `-s read-only\|workspace-write\|danger-full-access` |
 | Cursor | `cursor-agent` 2026.01.23 | `-p/--print` | **none** — prompt-level only | `--output-format stream-json`, `--stream-partial-output` | `--workspace <path>` | `--sandbox enabled\|disabled`, `--mode plan\|ask` (read-only), `-f/--force` |
@@ -227,7 +227,7 @@ Two cautions. It is the **only brain with no schema flag** (see §3), and some o
 
 Built and probed against the real `claude` binary, and every CLI adapter should inherit these lessons:
 
-- **`--json-schema` is a tool, not a decoding constraint.** Claude Code implements it as a `StructuredOutput` tool the model must call. So `--disallowed-tools '*'` denies the very mechanism the turn contract depends on: the run burns four turns retrying and returns nothing structured. Deny lists must be explicit, never wildcards.
+- **`--json-schema` is a tool, not a decoding constraint.** Claude Code implements it as a `StructuredOutput` tool the model must call. So `--disallowed-tools '*'` denies the very mechanism the turn contract depends on: the run burns four turns retrying and returns nothing structured. Roundstorm therefore passes `--tools` with an allow-list per tier; `--tools ""` leaves exactly `StructuredOutput` (checked against the installed CLI), and a tool added in a later release is unavailable until granted.
 - **Isolate the agent from the operator's own configuration.** Without `--setting-sources ''` and `--strict-mcp-config`, a Roundstorm agent inherits the user's global CLAUDE.md, hooks, skills and MCP servers. That is a reproducibility bug before it is a cost bug — two users get materially different agents from the same persona definition.
 - **Trim the advertised toolset per tier.** A turn carrying the default toolset costs ~18,700 input tokens; trimmed to the tier's actual needs, ~2,300. End to end: $0.11 for a naive probe versus $0.0044 for the same question configured properly. At five agents times five rounds that ratio *is* the product's cost profile, which makes §9's tier mapping a performance feature as much as a safety one.
 
@@ -417,13 +417,12 @@ promised both and a reader could reasonably have relied on it:
 
 - **Agents are not confined to the working directory.** The directory is passed as `--add-dir` / `--cd` / `--workspace`, which scopes what the CLI *offers* the model. None of these tools confines shell execution to it. At **Full local** an agent can act outside the working directory, so treat that tier as running a program you have not reviewed.
 - **There is no approval prompt before a destructive tool call.** The pause-and-confirm mechanism this section once described is not implemented. Nothing stands between a full-tier agent and a `rm` except the CLI's own defaults.
-- **Claude's gating is a deny-list**, computed by subtracting the tier's allowed tools from a hardcoded snapshot of tool names. A tool that Claude Code gains after that snapshot was written is not in the list, so it is not denied. An allow-list would be correct; this is not one yet.
 
 Tier → flag mapping, verified:
 
 | Tier | `claude` | `agy` | `codex exec` | `cursor-agent` |
 |---|---|---|---|---|
-| Reasoning only | `--disallowed-tools '*'` | `--sandbox`, no `--add-dir` | `-s read-only` + no workspace | `--mode ask --sandbox enabled` |
+| Reasoning only | `--tools ''` | `--sandbox`, no `--add-dir` | `-s read-only` + no workspace | `--mode ask --sandbox enabled` |
 | Research | allow web tools only | `--sandbox` | `-s read-only` | `--mode ask --sandbox enabled` |
 | Workstation (read-only) | `--add-dir <wd>`, read tools | `--add-dir <wd>`, `--mode plan` | `-C <wd> -s read-only` | `--mode plan --workspace <wd>` |
 | Full local | `--add-dir <wd>` + write tools | `--add-dir <wd>`, `--mode accept-edits` | `-C <wd> -s workspace-write` | `--workspace <wd> --sandbox enabled -f` |
