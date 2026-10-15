@@ -4,6 +4,10 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+
+/** These drive `sh` and Unix paths. Windows is covered by the pure functions in platform.test.ts (see #37). */
+const UNIX_ONLY = { skip: process.platform === 'win32' ? 'needs sh and Unix paths' : false }
+
 import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
@@ -64,7 +68,7 @@ const until = async (what: string, ok: () => boolean, ms = 20_000) => {
   }
 }
 
-test('Ctrl-C ends a run in flight: exit 130, nothing left running, no brain process left', async () => {
+test('Ctrl-C ends a run in flight: exit 130, nothing left running, no brain process left', UNIX_ONLY, async () => {
   // Wired by reading the code only, until now: it needs a deliberation in flight.
   // The fixture gives the CLI a brain that starts a process and never answers.
   const dir = mkdtempSync(join(tmpdir(), 'rs-sigint-'))

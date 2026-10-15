@@ -5,10 +5,14 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+
+/** These drive `sh` and Unix paths. Windows is covered by the pure functions in platform.test.ts (see #37). */
+const UNIX_ONLY = { skip: process.platform === 'win32' ? 'needs sh and Unix paths' : false }
+
 import { delimiter, sep } from 'node:path'
 import { enrichedPath, resolveBin } from './resolve.ts'
 
-test('a CLI is found even with a Finder-style stub PATH', () => {
+test('a CLI is found even with a Finder-style stub PATH', UNIX_ONLY, () => {
   const real = process.env.PATH
   try {
     process.env.PATH = '/usr/bin:/bin:/usr/sbin:/sbin'
@@ -19,7 +23,7 @@ test('a CLI is found even with a Finder-style stub PATH', () => {
   }
 })
 
-test('resolution returns an absolute path, never a bare name', () => {
+test('resolution returns an absolute path, never a bare name', UNIX_ONLY, () => {
   const p = resolveBin('sh')
   assert.ok(p && p.startsWith('/'), `got ${p}`)
 })
@@ -46,7 +50,7 @@ test('the enriched PATH has no duplicates', () => {
 
 // --- streamProcess: the two ways a spawn silently loses its way ---
 
-test('a spawned CLI is launched by absolute path, not by name', async () => {
+test('a spawned CLI is launched by absolute path, not by name', UNIX_ONLY, async () => {
   // A Finder-launched app inherits `/usr/bin:/bin:/usr/sbin:/sbin`. Spawning a
   // bare name there is ENOENT, and the agent just never speaks.
   const { streamProcess } = await import('./spawn.ts')
@@ -67,7 +71,7 @@ test('a spawned CLI is launched by absolute path, not by name', async () => {
     `sh should still resolve from the standard locations: ${events.join(', ')}`)
 })
 
-test('an adapter-supplied env is merged, never substituted', async () => {
+test('an adapter-supplied env is merged, never substituted', UNIX_ONLY, async () => {
   // codex passes CODEX_HOME. If that replaced the environment the child would
   // have no PATH at all — which is exactly how a conclave lost a participant for
   // five straight rounds while reporting it as a failure to reach consensus.
