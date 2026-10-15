@@ -7,6 +7,10 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+
+/** These drive `sh` and Unix paths. Windows is covered by the pure functions in platform.test.ts (see #37). */
+const UNIX_ONLY = { skip: process.platform === 'win32' ? 'needs sh and Unix paths' : false }
+
 import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -24,7 +28,7 @@ const collect = async (script: string, opts?: Partial<Parameters<typeof streamPr
   return { seen, events }
 }
 
-test('the last line is not lost when a CLI ends without a trailing newline', async () => {
+test('the last line is not lost when a CLI ends without a trailing newline', UNIX_ONLY, async () => {
   // `buf` only drained on '\n', so a CLI whose final JSON has no newline after it
   // — which is exactly where the result object lives — had that line silently
   // dropped. The turn then looked empty and the agent was reported as failing.
@@ -33,23 +37,23 @@ test('the last line is not lost when a CLI ends without a trailing newline', asy
     'the unterminated final line was dropped')
 })
 
-test('a normal newline-terminated stream is unchanged', async () => {
+test('a normal newline-terminated stream is unchanged', UNIX_ONLY, async () => {
   const { seen } = await collect('printf \'{"a":1}\\n{"b":2}\\n\'')
   assert.deepEqual(seen, [{ a: 1 }, { b: 2 }])
 })
 
-test('a trailing fragment that is not JSON is ignored rather than thrown', async () => {
+test('a trailing fragment that is not JSON is ignored rather than thrown', UNIX_ONLY, async () => {
   const { seen, events } = await collect('printf \'{"a":1}\\nnot json\'')
   assert.deepEqual(seen, [{ a: 1 }])
   assert.ok(events.some(e => e.type === 'activity'), 'the close event never arrived')
 })
 
-test('a finished process is no longer tracked', async () => {
+test('a finished process is no longer tracked', UNIX_ONLY, async () => {
   await collect('printf \'{"a":1}\\n\'')
   assert.equal(liveChildCount(), 0, 'a completed child was left in the registry')
 })
 
-test('terminateAll ends a brain the daemon is still holding', async () => {
+test('terminateAll ends a brain the daemon is still holding', UNIX_ONLY, async () => {
   // Quitting the app used to leave `claude`/`codex`/`cursor-agent` running
   // against the user's account: terminate() was only ever wired to a turn's
   // AbortSignal, and nothing reached the children on shutdown.

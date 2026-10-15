@@ -33,6 +33,24 @@ jobs:
       - run: npm run typecheck
       - run: npm test
 
+  # Windows has never been run (see #37), so this cell is informational: it
+  # cannot fail the build, and a red result here is information, not a
+  # regression. It exists so the first real failures are visible instead of
+  # hypothetical. Make it required once it has been green for a while.
+  windows:
+    name: windows (informational)
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
   # Coverage on a clean runner, shown in the job summary. Informational: there is
   # no threshold, because a number nobody chose would only train people to ignore
   # a red build. The table is cut out of the test output between node's own

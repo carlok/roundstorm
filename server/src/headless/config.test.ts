@@ -195,7 +195,7 @@ test('every experiment example in the docs and the in-app sample validates', asy
   const found: string[] = []
   for (const f of files) {
     const text = readFileSync(new URL(`../../../${f}`, import.meta.url), 'utf8')
-    for (const m of text.matchAll(/```(?:jsonc?|json5)\n([\s\S]*?)```/g)) {
+    for (const m of text.matchAll(/```(?:jsonc?|json5)\r?\n([\s\S]*?)```/g)) {
       if (/"agents"\s*:/.test(m[1])) found.push(`${f}: ${m[1].slice(0, 40).trim()}…`)
       if (/"agents"\s*:/.test(m[1])) {
         assert.doesNotThrow(() => parseExperiment(m[1], known), `${f} has an experiment example that no longer validates`)

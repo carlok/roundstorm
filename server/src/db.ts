@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join, posix, resolve, win32 } from 'node:path'
 import type {
   Agent, Claim, Deliberation, LogEntry, MemoryCard, Message, Position,
   PositionStanceRow, Project, ResultCard, Room, Source, Stance, Tier,
@@ -18,14 +18,17 @@ import type {
  * is worse, because the data ends up somewhere no backup tool or user expects.
  */
 export function defaultDataDirFor(platform: NodeJS.Platform, home: string, env: NodeJS.ProcessEnv = {}): string {
+  // The separator belongs to the platform being asked about, not the one running:
+  // on Windows the host `join` would turn a Linux answer into backslashes.
+  const p = platform === 'win32' ? win32 : posix
   switch (platform) {
     case 'darwin':
-      return join(home, 'Library', 'Application Support', 'Roundstorm')
+      return p.join(home, 'Library', 'Application Support', 'Roundstorm')
     case 'win32':
-      return join(env.APPDATA ?? join(home, 'AppData', 'Roaming'), 'Roundstorm')
+      return p.join(env.APPDATA ?? p.join(home, 'AppData', 'Roaming'), 'Roundstorm')
     default:
       // XDG Base Directory, which is what Linux desktops and backup tools expect.
-      return join(env.XDG_DATA_HOME ?? join(home, '.local', 'share'), 'roundstorm')
+      return p.join(env.XDG_DATA_HOME ?? p.join(home, '.local', 'share'), 'roundstorm')
   }
 }
 
