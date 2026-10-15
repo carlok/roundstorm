@@ -9,7 +9,7 @@ import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { isAbsolute, join } from 'node:path'
 import express from 'express'
 import type { Server } from 'node:http'
 
@@ -164,7 +164,7 @@ test('a working directory is stored resolved, not as given', async () => {
   const res = await patch(`/api/projects/${p.id}`, { workingDir: '.' })
   assert.equal(res.status, 200)
   const stored = db.getProject(p.id)!.workingDir!
-  assert.ok(stored.startsWith('/'), `stored as ${stored}`)
+  assert.ok(isAbsolute(stored), `stored as ${stored}`)
 })
 
 // --- the framework behaviour this file's routes now rely on ---
