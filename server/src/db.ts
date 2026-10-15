@@ -534,6 +534,18 @@ export const listDeliberations = (roomId: string): Deliberation[] =>
 
 // ---------- activity log (plan §12) ----------
 
+/**
+ * Convention for events:
+ *  - `roomId`, `deliberationId` and `agentId` are columns, not payload. Set each
+ *    one the event concerns and that is known at the call site; the log is read
+ *    by room, so an event without `roomId` is invisible in that room's history.
+ *  - Ids of any OTHER entity (a message, a child room, a position) go in the
+ *    payload, under a name that says what they are (`messageId`, `child`).
+ *  - Events about the daemon or the whole store carry no room and say so with
+ *    their type prefix (`daemon.*`, `backup.*`, `search.*`).
+ *  - `room.cleared` and `room.deleted` are the only events that outlive nothing:
+ *    clearing or deleting a room removes the room's events, then writes its own.
+ */
 export function logEvent(
   type: string,
   opts: { roomId?: string | null; deliberationId?: string | null; agentId?: string | null; payload?: unknown } = {},

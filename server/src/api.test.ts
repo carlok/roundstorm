@@ -100,6 +100,30 @@ test('stop, interrupt, extend and a room edit on an unknown id are 404s', async 
   assert.equal(res.status, 404)
 })
 
+test('both backup routes log the same event shape', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rs-bk-'))
+  process.env.ROUNDSTORM_BACKUP_DIR = dir
+  const before = db.listEvents(null, 5000).filter(e => e.type === 'backup.created').length
+
+  assert.equal((await post('/api/backup', {})).status, 200)
+  const dl = await fetch(`${origin}/api/backup`)
+  assert.equal(dl.status, 200)
+  await dl.arrayBuffer()
+
+  // Written on the response's close for the download, so give it a moment.
+  for (let i = 0; i < 40 && db.listEvents(null, 5000).filter(e => e.type === 'backup.created').length < before + 2; i++) {
+    await new Promise(r => setTimeout(r, 25))
+  }
+  const events = db.listEvents(null, 5000).filter(e => e.type === 'backup.created').slice(-2)
+  assert.equal(events.length, 2)
+  for (const e of events) {
+    assert.deepEqual(Object.keys(e.payload as object).sort(), ['bytes', 'path', 'via'], 'the two routes log different shapes')
+  }
+  const vias = events.map(e => (e.payload as any).via).sort()
+  assert.deepEqual(vias, ['download', 'file'])
+  delete process.env.ROUNDSTORM_BACKUP_DIR
+})
+
 // --- privilege fields ---
 
 /** An agent with a known ceiling, to prove a refused request changed nothing. */

@@ -19,7 +19,7 @@ import { Ask, type AskSpec } from './components/Ask.tsx'
 import { Manual } from './components/Manual.tsx'
 import { LoadExperiment } from './components/LoadExperiment.tsx'
 import { copyText, messageToMarkdown, resultToMarkdown, transcriptToMarkdown } from './lib/clipboard.ts'
-import { apiUrl } from './lib/api.ts'
+import { api, apiUrl } from './lib/api.ts'
 import { installMathCopy } from './lib/mathcopy.ts'
 import { applyTitlebarInset } from './lib/api.ts'
 import type { Agent, Message, Room, Tier } from './types.ts'
@@ -60,6 +60,23 @@ export function App() {
     setToast(text)
     setTimeout(() => setToast(null), 1600)
   }, [])
+
+  /**
+   * A mutating call that tells the user when it failed. Returns the response on
+   * success and null after showing the server's own message (or `fallback`), so a
+   * caller can stop instead of carrying on as if it had worked.
+   */
+  const call = useCallback(async (path: string, init: RequestInit, fallback: string) => {
+    try {
+      const res = await api(path, init)
+      if (res.ok) return res
+      const body = await res.json().catch(() => ({} as { error?: string }))
+      flash(body.error ?? `${fallback} (${res.status})`)
+    } catch {
+      flash(`${fallback}: the daemon did not answer`)
+    }
+    return null
+  }, [flash])
 
   const roster = useMemo(
     () => (rs.room?.memberIds ?? []).map(id => rs.agentById(id)).filter(Boolean) as NonNullable<ReturnType<typeof rs.agentById>>[],
@@ -125,10 +142,10 @@ export function App() {
       confirmLabel: 'Rename',
       onConfirm: async next => {
         if (next === room.name) return
-        await fetch(apiUrl(`/api/rooms/${room.id}`), {
+        if (!await call(`/api/rooms/${room.id}`, {
           method: 'PATCH', headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ name: next }),
-        })
+        }, 'Could not rename the room')) return
         await rs.refreshBoot()
       },
     })
@@ -139,11 +156,7 @@ export function App() {
       confirmLabel: 'Delete',
       danger: true,
       onConfirm: async () => {
-        const res = await fetch(apiUrl(`/api/rooms/${room.id}`), { method: 'DELETE' })
-        if (!res.ok) {
-          const { error } = await res.json().catch(() => ({ error: 'could not delete' }))
-          return flash(error)
-        }
+        if (!await call(`/api/rooms/${room.id}`, { method: 'DELETE' }, 'Could not delete the room')) return
         if (rs.roomId === room.id) rs.setRoomId(null)
         await rs.refreshBoot()
       },
@@ -160,9 +173,9 @@ export function App() {
         detail: 'Deletes the messages, positions, sources, results and everything the agents remembered from this room — including memory cards you already accepted. The room and its cast stay.',
         confirmLabel: 'Clear', danger: true,
         onConfirm: async () => {
-          const res = await fetch(apiUrl(`/api/rooms/${room.id}/messages`), { method: 'DELETE' })
-          const body = await res.json().catch(() => ({ error: 'could not clear' }))
-          if (!res.ok) return flash(body.error)
+          const res = await call(`/api/rooms/${room.id}/messages`, { method: 'DELETE' }, 'Could not clear the room')
+          if (!res) return
+          const body = await res.json().catch(() => ({ messages: 0, memoryCards: 0 }))
           // Say what actually went, so "did that clear the memory too?" is
           // answered by the app rather than by reading the source.
           flash(`Cleared ${body.messages} message${body.messages === 1 ? '' : 's'}`
@@ -173,7 +186,7 @@ export function App() {
       }) },
       { label: 'Delete room…', danger: true, onSelect: del },
     ] })
-  }, [rs, flash])
+  }, [rs, flash, call])
 
   const openMenu = useCallback((m: Message, x: number, y: number) => {
     const agent = rs.agentById(m.authorId)
@@ -198,7 +211,7 @@ export function App() {
         },
       }] : []),
     ] })
-  }, [rs, flash])
+  }, [rs, flash, call])
 
   const submit = () => {
     const body = draft.trim()
@@ -222,9 +235,8 @@ export function App() {
       { id: 'backup', label: 'Back up everything…', hint: 'action',
         run: async () => {
           flash('Backing up…')
-          const r = await fetch(apiUrl('/api/backup'), { method: 'POST' })
-          const d = await r.json().catch(() => ({}))
-          flash(r.ok ? `Saved to ${d.path}` : d.error ?? 'Backup failed')
+          const r = await call('/api/backup', { method: 'POST' }, 'Backup failed')
+          if (r) flash(`Saved to ${(await r.json().catch(() => ({}))).path}`)
         } },
       { id: 'lab', label: 'Persona lab — compare brains', hint: 'experiment', run: () => setLab(true) },
       { id: 'new-room', label: 'New room…', hint: 'action', run: () => setRoomSheet({ room: null }) },
@@ -256,7 +268,7 @@ export function App() {
     }))
 
     return [...actions, ...rooms]
-  }, [rs, flash])
+  }, [rs, flash, call])
 
   // An unexplained blank window is the worst possible failure mode for a
   // desktop app, so say what is happening and what to do if it stalls.
@@ -342,7 +354,7 @@ export function App() {
                       setMenu({ x: e.clientX, y: e.clientY, items: [
                         { label: 'Configure…', onSelect: () => setAgentSheet({ agent: a }) },
                         { label: 'Duplicate', onSelect: async () => {
-                          await fetch(apiUrl(`/api/agents/${a.id}/duplicate`), { method: 'POST' })
+                          if (!await call(`/api/agents/${a.id}/duplicate`, { method: 'POST' }, 'Could not duplicate')) return
                           await rs.refreshBoot()
                         } },
                         { label: 'Delete…', danger: true, onSelect: () => setAsk({
@@ -350,7 +362,7 @@ export function App() {
                           detail: 'It leaves every room. Messages it already wrote stay in the transcripts.',
                           confirmLabel: 'Delete', danger: true,
                           onConfirm: async () => {
-                            await fetch(apiUrl(`/api/agents/${a.id}`), { method: 'DELETE' })
+                            if (!await call(`/api/agents/${a.id}`, { method: 'DELETE' }, 'Could not delete')) return
                             await rs.refreshBoot()
                           },
                         }) },
