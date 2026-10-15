@@ -52,7 +52,7 @@ export function stopDeliberation(id: string) {
 export function interruptDeliberation(id: string) {
   const r = running.get(id)
   if (!r) return
-  db.logEvent('deliberation.interrupted', { deliberationId: id })
+  db.logEvent('deliberation.interrupted', { roomId: db.getDeliberation(id)?.roomId, deliberationId: id })
   // Read by runRounds, which replaces the controller and repeats the round with
   // the steer included. Without this the abort simply ended the deliberation,
   // while the button and the manual both promised a restart — and the turns
@@ -191,7 +191,9 @@ async function runRounds(deliberationId: string, signal: AbortSignal) {
       entry.interrupt = false
       entry.controller = new AbortController()
       signal = entry.controller.signal
-      db.logEvent('round.restarted', { deliberationId, payload: { round } })
+      db.logEvent('round.restarted', {
+        roomId: db.getDeliberation(deliberationId)?.roomId, deliberationId, payload: { round },
+      })
       round -= 1
       continue
     }

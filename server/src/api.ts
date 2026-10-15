@@ -224,7 +224,7 @@ export function makeApi() {
       mkdirSync(dir, { recursive: true })
       await db.db.backup(path)
       const bytes = statSync(path).size
-      db.logEvent('backup.created', { payload: { path, bytes } })
+      db.logEvent('backup.created', { payload: { via: 'file', path, bytes } })
       res.json({ ok: true, path, bytes })
     } catch (err) {
       res.status(500).json({ error: `backup failed: ${String(err)}` })
@@ -238,7 +238,7 @@ export function makeApi() {
     try {
       await db.db.backup(tmp)
       const bytes = statSync(tmp).size
-      db.logEvent('backup.created', { payload: { bytes } })
+      db.logEvent('backup.created', { payload: { via: 'download', path: null, bytes } })
       res.setHeader('content-type', 'application/vnd.sqlite3')
       res.setHeader('content-disposition', `attachment; filename="${name}"`)
       res.setHeader('content-length', String(bytes))
