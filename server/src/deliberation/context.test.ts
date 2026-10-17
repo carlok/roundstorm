@@ -221,3 +221,29 @@ test('prompt size grows slowly once the budget binds', () => {
   const sizeAt = (r: number) => compose(make(r), 12_000, r + 1).userPrompt.length
   assert.ok(sizeAt(10) < sizeAt(3) * 2.2, 'prompt size still tracks the length of the discussion')
 })
+
+test('a dropped message leaves one line: who, which round, stance, the gist', () => {
+  const history = [
+    { ...msg('o1', 'a-Bruno', 'Bearings fail first. Everything after is detail ' + 'q'.repeat(900), 1), stance: 'oppose' as const },
+    ...long().filter(m => m.round !== 1),
+  ]
+  const ctx = compose(history, 3_000)
+  assert.ok(ctx.omittedMessages >= 1)
+  assert.match(ctx.userPrompt, /- Bruno, round 1 \[oppose\]: Bearings fail first\./)
+  assert.ok(!ctx.userPrompt.includes('q'.repeat(50)), 'the body of a dropped message leaked into the digest')
+})
+
+test('a digest line is cut short, and the lines share a bounded allowance', () => {
+  const many = Array.from({ length: 40 }, (_, i) => msg(`d${i}`, 'a-Alice', 'Sentence without an end ' + 'w'.repeat(400), 1 + (i % 2)))
+  const ctx = compose([...many, ...long().filter(m => m.round === 3)], 4_000)
+  const lines = ctx.userPrompt.split('\n').filter(l => l.startsWith('- Alice, round'))
+  assert.ok(lines.length > 0)
+  assert.ok(lines.every(l => l.length <= 190), 'a digest line was not shortened')
+  assert.match(ctx.userPrompt, /\(\d+ older not listed\)/, 'the allowance should have run out and said so')
+  const t = ctx.sections.find(s => s.name === 'transcript')!
+  assert.ok(t.chars <= 4_000 + 600, `transcript was ${t.chars} chars`)
+})
+
+test('under the budget there is no digest at all', () => {
+  assert.ok(!compose(long(), 100_000).userPrompt.includes('one line each'))
+})
