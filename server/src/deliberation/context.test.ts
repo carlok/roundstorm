@@ -224,12 +224,12 @@ test('prompt size grows slowly once the budget binds', () => {
 
 test('a dropped message leaves one line: who, which round, stance, the gist', () => {
   const history = [
-    { ...msg('o1', 'a-Bruno', 'Bearings fail first. Everything after is detail ' + 'q'.repeat(900), 1), stance: 'oppose' as const },
+    { ...msg('o1', 'a-Bruno', 'Bearings fail first. Everything after is detail ' + 'q'.repeat(900), 1), stance: 'object' as const },
     ...long().filter(m => m.round !== 1),
   ]
   const ctx = compose(history, 3_000)
   assert.ok(ctx.omittedMessages >= 1)
-  assert.match(ctx.userPrompt, /- Bruno, round 1 \[oppose\]: Bearings fail first\./)
+  assert.match(ctx.userPrompt, /- Bruno, round 1 \[object\]: Bearings fail first\./)
   assert.ok(!ctx.userPrompt.includes('q'.repeat(50)), 'the body of a dropped message leaked into the digest')
 })
 
