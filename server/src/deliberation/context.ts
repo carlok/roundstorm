@@ -222,6 +222,18 @@ export const HISTORY_BUDGET_CHARS = (() => {
 
 interface Rendered { text: string; omitted: number }
 
+/** Most characters of one-line summaries a trimmed transcript may carry. */
+const DIGEST_CHARS = 6_000
+
+/** "- Alice, round 2 [oppose]: the first sentence, cut short." */
+function digestLine(m: Message, nameOf: (m: Message) => string): string {
+  const flat = m.body.replace(/\s+/g, ' ').trim()
+  const firstSentence = /^.*?[.!?](?=\s|$)/.exec(flat)?.[0] ?? flat
+  const gist = firstSentence.length > 140 ? `${firstSentence.slice(0, 137)}...` : firstSentence
+  const where = m.round != null ? `, round ${m.round}` : ''
+  return `- ${nameOf(m)}${where}${m.stance ? ` [${m.stance}]` : ''}: ${gist}`
+}
+
 function renderMessage(m: Message, nameOf: (m: Message) => string): string[] {
   const lines: string[] = []
   const reply = m.replyTo ? ` (replying to ${m.replyTo})` : ''
@@ -262,7 +274,14 @@ export function renderHistoryWithin(history: Message[], roster: Agent[], budget:
   const newest = rounds.length ? Math.max(...rounds) : null
   const pinned = (m: Message) => m.authorType === 'human' || (newest != null && m.round === newest)
 
-  for (let i = 0; i < history.length && used > budget; i++) {
+  // Dropped messages are not gone without trace: each leaves one line saying who
+  // spoke, in which round, with what stance and the gist. That is a fraction of
+  // the message, and it keeps the thread of the discussion readable. The lines get
+  // a share of the budget, so the total still fits.
+  let digestLeft = used > budget ? Math.min(DIGEST_CHARS, Math.floor(budget * 0.15)) : 0
+  const target = budget - digestLeft
+
+  for (let i = 0; i < history.length && used > target; i++) {
     if (pinned(history[i])) continue
     keep.delete(i)
     used -= size(i)
@@ -270,15 +289,26 @@ export function renderHistoryWithin(history: Message[], roster: Agent[], budget:
 
   const lines = ['# Discussion so far', '']
   let lastRound: number | null = null
-  let omittedRun = 0
+  let run: Message[] = []
   let omitted = 0
   const flush = () => {
-    if (!omittedRun) return
-    lines.push(`[${omittedRun} earlier message${omittedRun === 1 ? '' : 's'} omitted to keep this prompt a manageable size. The ledger above still records every position they raised.]`, '')
-    omittedRun = 0
+    if (!run.length) return
+    const n = run.length
+    lines.push(`[${n} earlier message${n === 1 ? '' : 's'} omitted to keep this prompt a manageable size; one line each below. The ledger above still records every position they raised.]`)
+    // Newest first into the allowance, so if it runs out it is the oldest that go.
+    const kept: string[] = []
+    for (const m of [...run].reverse()) {
+      const line = digestLine(m, nameOf)
+      if (line.length + 1 > digestLeft) break
+      digestLeft -= line.length + 1
+      kept.unshift(line)
+    }
+    if (kept.length < n) lines.push(`- (${n - kept.length} older not listed)`)
+    lines.push(...kept, '')
+    run = []
   }
   history.forEach((m, i) => {
-    if (!keep.has(i)) { omittedRun++; omitted++; return }
+    if (!keep.has(i)) { run.push(m); omitted++; return }
     flush()
     if (m.round !== lastRound && m.round != null) {
       lines.push(`## Round ${m.round}`, '')
