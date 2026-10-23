@@ -56,3 +56,5 @@ what an agent was *given* is a fact; what it said is not.
   shows up in a release build.
 - Security-relevant? Read [SECURITY.md](SECURITY.md) first, and report real
   vulnerabilities privately rather than in a PR.
+- Community conduct is covered by [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+  (Contributor Covenant 2.1).
