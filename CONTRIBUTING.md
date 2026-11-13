@@ -9,6 +9,7 @@ silently.
 npm install
 npm run typecheck
 npm test            # unit and integration; no brain, no network, no spend
+npm run coverage    # same suite with a coverage table (CI publishes this)
 npm run test:ui     # builds the bundle and drives headless Chrome over it
 ```
 
@@ -46,9 +47,12 @@ it was shown. `registerAdapter()` swaps it in. That is how
 `deliberation/scheduler.test.ts` asserts round isolation, steering and deadlines:
 what an agent was *given* is a fact; what it said is not.
 
+Coding agents should also read [AGENT.md](AGENT.md).
+
 ## Before you open a PR
 
 - `npm run typecheck && npm test` is green.
+- Prefer raising coverage for code you change (`npm run coverage`).
 - If you touched anything under `web/src`, run `npm run test:ui`.
 - If you touched `src-tauri/` or the daemon's origin handling, build the app
   (`npm run app:build`) and launch it. `tauri dev` loads from `localhost:5273` and
