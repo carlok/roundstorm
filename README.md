@@ -179,6 +179,7 @@ npm run test:ui   # the browser sweep; needs a build and a Chrome
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the three rules a change can break without noticing.
+Autonomous coding agents should read [AGENT.md](AGENT.md).
 
 Run `npm run coverage` for current numbers; none are quoted here because a figure
 in a README is stale the next time anyone touches a test. The overall average is

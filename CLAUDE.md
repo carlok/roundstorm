@@ -53,6 +53,13 @@ When spawning subagents (Agent/Task tool), the routing block is automatically in
 - Write artifacts (code, configs, PRDs) to FILES — never return them as inline text. Return only: file path + 1-line description.
 - When indexing content, use descriptive source labels so others can `ctx_search(source: "label")` later.
 
+## Repository commits
+
+For Roundstorm code changes, see [AGENT.md](AGENT.md) for layout and npm commands.
+**Before each commit**, run `npm run typecheck && npm test` and try to **increase test
+coverage** for the code you touched (`npm run coverage`). Never commit secrets or
+host-specific values; keep public docs general.
+
 ## ctx commands
 
 | Command | Action |
