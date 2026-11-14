@@ -58,7 +58,8 @@ Coding agents should also read [AGENT.md](AGENT.md).
   (`npm run app:build`) and launch it. `tauri dev` loads from `localhost:5273` and
   cannot reproduce the packaged `tauri://localhost` origin, so a blank window only
   shows up in a release build.
-- Security-relevant? Read [SECURITY.md](SECURITY.md) first, and report real
-  vulnerabilities privately rather than in a PR.
+- Security-relevant? Read [SECURITY.md](SECURITY.md) first. Report real
+  vulnerabilities only through GitHub private vulnerability reporting (see
+  SECURITY.md)—not in a public issue, PR, or discussion.
 - Community conduct is covered by [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
   (Contributor Covenant 2.1).
