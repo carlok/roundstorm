@@ -5,10 +5,15 @@ machine. At the upper capability tiers those agents read files and execute
 programs, so the security model is worth stating plainly rather than leaving to be
 discovered.
 
-## Reporting
+## Reporting vulnerabilities
 
-Open a [private security advisory](https://github.com/carlok/roundstorm/security/advisories/new).
-Please don't use a public issue for anything that affects a running install.
+Report security issues **privately** through GitHub [private vulnerability
+reporting](https://docs.github.com/code-security/security-advisories/guidance-on-reporting-and-writing-information-about-vulnerabilities/privately-reporting-a-security-vulnerability):
+open the repository **Security** tab → **Report a vulnerability**, or go directly to
+[report a vulnerability](https://github.com/carlok/roundstorm/security/advisories/new).
+
+Do **not** open a public issue, pull request, or discussion for anything that could
+affect confidentiality, integrity, or availability of a running install.
 
 There is no bounty and no SLA — this is a personal project. Expect a reply in days,
 not hours.

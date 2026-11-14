@@ -509,7 +509,8 @@ execution to a directory, so **full local is full local** — treat it as runnin
 program you did not write, because that is what it is. `docs/design.md` §9 has the
 exact tier-to-flag mapping and the limits.
 
-Found something? See [SECURITY.md](SECURITY.md).
+Found a vulnerability? Report it privately per [SECURITY.md](SECURITY.md)—not via a
+public issue.
 
 ## Licence
 
