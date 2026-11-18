@@ -231,3 +231,13 @@ test('an agent in a running deliberation cannot be deleted from under it', async
   db.updateDeliberation(d.id, { status: 'complete' })
   assert.equal((await del()).status, 200)
 })
+
+test('the ledger route returns the run summary, and 404s for a room that does not exist', async () => {
+  const r = room('ledger-room')
+  const res = await fetch(`${origin}/api/rooms/${r.id}/ledger`)
+  assert.equal(res.status, 200)
+  const body = await res.json()
+  assert.equal(body.standing, null)
+  assert.equal(body.level, 'no_reliable_conclusion')
+  assert.equal((await fetch(`${origin}/api/rooms/nope/ledger`)).status, 404)
+})

@@ -9,6 +9,11 @@ export interface LedgerSummary {
   leading: import('../../server/src/types.ts').Position | null
   level: import('../../server/src/types.ts').ConsensusLevel
   headline: string
+  /** The leading position at its current version: who backs it, who holds out. */
+  standing?: {
+    label: string; version: number; title: string
+    backers: string[]; holdouts: string[]; n: number
+  } | null
 }
 
 export interface Persona { key: string; label: string; blurb: string; contract: string }

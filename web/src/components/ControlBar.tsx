@@ -1,5 +1,6 @@
-import type { Agent, AgentActivity, Deliberation } from '../types.ts'
+import type { Agent, AgentActivity, Deliberation, LedgerSummary, Message } from '../types.ts'
 import { Avatar } from './Avatar.tsx'
+import { roundLine, runCost, standingLine } from '../lib/live.ts'
 
 const STATE_LABEL: Record<AgentActivity['state'], string> = {
   idle: '', waiting: 'Waiting', thinking: 'Thinking', tool: 'Working',
@@ -10,21 +11,27 @@ const STATE_LABEL: Record<AgentActivity['state'], string> = {
  * Replaces every orchestration concept the user would otherwise have to learn
  * (plan §2.4). [+1 round] is expected to be the most-used button in the product.
  */
-export function ControlBar({ deliberation, roster, activity, onExtend, onStop, onInterrupt }: {
+export function ControlBar({ deliberation, roster, activity, ledger, messages, onExtend, onStop, onInterrupt }: {
   deliberation: Deliberation
   roster: Agent[]
   activity: Record<string, AgentActivity>
+  ledger: LedgerSummary | null
+  messages: Message[]
   onExtend: (by: number) => void
   onStop: () => void
   onInterrupt: () => void
 }) {
   const sealed = deliberation.sealedOpening && deliberation.currentRound === 1
+  // Hidden while a round is sealed: the human would otherwise see the blind
+  // positions before the agents' reveal.
+  const standing = sealed ? null : standingLine(ledger, deliberation.mode)
+  const cost = runCost(messages, deliberation.id)
   return (
     <div className="controlbar">
       <div className="controlbar-top">
         <span className="cb-mode">{label(deliberation.mode)}</span>
         <span className="cb-sep">·</span>
-        <span>Round {Math.max(1, deliberation.currentRound)} of {deliberation.rounds}</span>
+        <span>{roundLine(deliberation)}</span>
         <span className="cb-sep">·</span>
         <span>{deliberation.style === 'parallel' ? 'Parallel' : 'Ping-pong'}</span>
         {sealed && <span className="chip chip-sealed">sealed round</span>}
@@ -38,6 +45,14 @@ export function ControlBar({ deliberation, roster, activity, onExtend, onStop, o
         </button>
           <button className="danger" onClick={onStop}>Stop</button>
         </div>
+      </div>
+      <div className="controlbar-live" aria-live="polite">
+        <span className="cb-standing" title={ledger?.headline ?? ''}>
+          {standing ?? (sealed ? 'Positions are sealed until everyone has committed' : 'No position on the record yet')}
+        </span>
+        <span className="cb-cost" title="Only some brains report a cost; the rest count as unknown, not as free">
+          Cost {cost}
+        </span>
       </div>
       <div className="controlbar-agents">
         {roster.map(a => {

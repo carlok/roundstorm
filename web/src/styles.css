@@ -146,6 +146,15 @@ button.danger { color: var(--danger); }
   border: 1px solid var(--line); background: var(--bg);
   padding: 3px 10px; border-radius: 6px; font-size: 12px;
 }
+.controlbar-live {
+  display: flex; align-items: baseline; gap: 12px; margin-top: 6px;
+  color: var(--fg-dim); min-width: 0;
+}
+.cb-standing {
+  flex: 1; min-width: 0; color: var(--fg);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cb-cost { flex: none; color: var(--fg-faint); font-variant-numeric: tabular-nums; }
 .controlbar-agents {
   display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 8px;
 }

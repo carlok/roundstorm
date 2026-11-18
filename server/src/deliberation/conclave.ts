@@ -17,7 +17,7 @@
  *
  * And on the cap: report failure. Never soften it into agreement.
  */
-import type { Agent, Deliberation, Message, Room } from '../types.ts'
+import { conclaveCap, type Agent, type Deliberation, type Message, type Room } from '../types.ts'
 import * as db from '../db.ts'
 import { bus } from '../bus.ts'
 import { historyFor } from './history.ts'
@@ -43,8 +43,7 @@ export interface ConclaveHooks {
   takeInterrupt?: () => AbortSignal | null
 }
 
-/** `rounds` is the emergency maximum, with a floor so a conclave can negotiate. */
-export const conclaveCap = (rounds: number | null | undefined): number => Math.max(4, rounds ?? 8)
+export { conclaveCap }
 
 export interface ConclaveOutcome {
   reached: boolean

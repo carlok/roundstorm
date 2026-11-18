@@ -12,7 +12,7 @@ import type { Agent, Deliberation, Message, Mode, Room } from '../types.ts'
 import { personaByKey } from './personas.ts'
 import { PROMPT_CONTRACT } from './contract.ts'
 import { renderLedger } from './ledger.ts'
-import { conclaveCap } from './conclave.ts'
+import { conclaveCap } from '../types.ts'
 import { listMemory, listSources } from '../db.ts'
 
 export const MODE_LABEL: Record<Mode, string> = {
