@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { coerceTurn, extractJson, stripJsonBlock } from './contract.ts'
+import { PROMPT_CONTRACT, coerceTurn, extractJson, stripJsonBlock } from './contract.ts'
 
 test('schema-shaped output passes through intact', () => {
   const r = coerceTurn({
@@ -104,4 +104,33 @@ test('vendor-injected extra keys are ignored rather than degrading the turn', ()
   }, 'f')
   assert.equal(r.degraded, false)
   assert.equal(r.turn.claims.length, 1)
+})
+
+test('the prompted contract names every field the turn instruction asks for', () => {
+  // It stopped at body/stance/claims, so cursor-agent was told to record
+  // position_ops and never shown where they go.
+  for (const field of ['stance', 'claims', 'position_ops', 'memory']) {
+    assert.ok(PROMPT_CONTRACT.includes(`"${field}"`), `${field} missing from the contract`)
+  }
+  assert.ok(!/repeat it here in full/.test(PROMPT_CONTRACT), 'still asks for the body twice')
+})
+
+test('a prompted reply without a body in its block takes the prose as the message', () => {
+  const text = [
+    'Oil whip fits the sub-synchronous peak better than anything else on the table.',
+    '',
+    '```json',
+    JSON.stringify({
+      stance: 'propose', reply_to: '',
+      claims: [{ text: 'The peak sits at 0.47x', basis: 'reasoned' }],
+      position_ops: [{ op: 'assert', label: '', title: 'Oil whip', text: 'It is oil whip.', note: '' }],
+      memory: [],
+    }),
+    '```',
+  ].join('\n')
+  const parsed = coerceTurn(extractJson(text), stripJsonBlock(text))
+  assert.match(parsed.turn.body, /^Oil whip fits/)
+  assert.equal(parsed.degraded, false)
+  assert.equal(parsed.positionOps.length, 1)
+  assert.equal(parsed.positionOps[0].title, 'Oil whip')
 })

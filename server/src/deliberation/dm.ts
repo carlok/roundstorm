@@ -10,7 +10,7 @@ import { bus } from '../bus.ts'
 import { getAdapter, schemaFor } from '../adapters/registry.ts'
 import { personaByKey } from './personas.ts'
 import { TURN_SCHEMA, coerceTurn, extractJson, stripJsonBlock } from './contract.ts'
-import { TURN_TIMEOUT_MS } from './scheduler.ts'
+import { TURN_TIMEOUT_MS, lowerTier, resolveWorkspace } from './scheduler.ts'
 
 export async function replyInDm(room: Room, trigger: Message) {
   const agent = room.memberIds[0] ? db.getAgent(room.memberIds[0]) : undefined
@@ -41,13 +41,26 @@ export async function replyInDm(room: Room, trigger: Message) {
     `# Their message\n\n${trigger.body}`,
   ].filter(Boolean).join('\n\n---\n\n')
 
+  // The same tier rules as a deliberation turn. This used to hand the adapter the
+  // room's tier as-is with no working directory, so a one-to-one chat set to Full
+  // gave a Research-capped agent write and shell access, running wherever the
+  // daemon happened to be.
+  const requested = lowerTier(room.tier, agent.tierCeiling)
+  const workspace = resolveWorkspace(room, requested)
+  if (workspace.downgraded) {
+    db.logEvent('tier.downgraded', {
+      roomId: room.id, agentId: agent.id,
+      payload: { dm: true, requested, granted: workspace.tier, reason: workspace.reason },
+    })
+  }
+
   bus.emit({ type: 'activity', roomId: room.id, activity: {
     agentId: agent.id, state: 'thinking', detail: 'Thinking', round: null, startedAt: Date.now() } })
 
   db.logEvent('turn.started', {
     roomId: room.id, agentId: agent.id,
     payload: {
-      dm: true, brain: agent.brain, model: agent.model,
+      dm: true, brain: agent.brain, model: agent.model, tier: workspace.tier,
       systemPromptBytes: Buffer.byteLength(systemPrompt),
       userPromptBytes: Buffer.byteLength(userPrompt),
       promptDigest: createHash('sha256')
@@ -67,8 +80,8 @@ export async function replyInDm(room: Room, trigger: Message) {
 
   try {
     for await (const ev of adapter.run({
-      systemPrompt, userPrompt, model: agent.model, tier: room.tier,
-      workingDir: null, schema: schemaFor(adapter, TURN_SCHEMA),
+      systemPrompt, userPrompt, model: agent.model, tier: workspace.tier,
+      workingDir: workspace.workingDir, schema: schemaFor(adapter, TURN_SCHEMA),
     }, controller.signal)) {
       if (ev.type === 'activity') emitActivity(room.id, agent.id, 'thinking', ev.text)
       else if (ev.type === 'tool') emitActivity(room.id, agent.id, 'tool', ev.detail ?? ev.name)

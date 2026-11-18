@@ -36,6 +36,8 @@ export interface StubOptions {
   turn?: (call: StubCall, index: number) => unknown
   /** Never resolve, so the per-turn deadline is what ends it. */
   hang?: boolean
+  /** Stream this text first, then hang: a turn cut off partway through. */
+  partial?: string
   /** Fail the way a missing CLI does. */
   fail?: string
   /** Artificial delay in ms, for ordering and cancellation tests. */
@@ -85,7 +87,9 @@ async function* generate(
     return
   }
 
-  if (opts.hang) {
+  if (opts.partial) yield { type: 'delta', text: opts.partial }
+
+  if (opts.hang || opts.partial) {
     // Resolve only on abort, so the caller's deadline is what ends the turn.
     await new Promise<void>(resolve => {
       if (signal.aborted) return resolve()

@@ -24,6 +24,9 @@ import type { RawPositionOp } from './contract.ts'
  */
 const DUPLICATE_THRESHOLD = 0.70
 
+/** Ops that assert content, and so may create a position or merge into one. */
+const CAN_OPEN = new Set(['assert', 'revise', 'endorse'])
+
 /**
  * One ledger write at a time, per room.
  *
@@ -70,6 +73,19 @@ async function applyPositionOpsUnsafe(args: {
   for (const op of ops) {
     let row = op.label ? db.getPositionByLabel(roomId, op.label) : null
     let mergedInto: string | null = null
+
+    // Only an op that puts something ON the record may open a position or be
+    // folded into one. An oppose, unsure or withdraw with a label that names
+    // nothing used to fall through to the merge below and come out as an
+    // endorsement (or a co-assertion in a sealed round) of whatever its title most
+    // resembled: "X is not the cause" recorded as support for "X is the cause".
+    if (!row && op.title && !CAN_OPEN.has(op.op)) {
+      db.logEvent('position.op_dropped', {
+        roomId, agentId: agent.id, deliberationId,
+        payload: { op: op.op, label: op.label, title: op.title, messageId },
+      })
+      continue
+    }
 
     if (!row && op.title) {
       // Agents restate a peer's position under a new title instead of endorsing
@@ -167,7 +183,13 @@ export function summarise(roomId: string, roster: Agent[], deliberationId?: stri
     }
   }
 
-  const score = (p: Position) => p.stances.filter(s => SUPPORT.has(s.op)).length
+  // Support counts at the position's CURRENT version only. A revision deletes the
+  // endorsements made against the old text, but an `assert` survived, so its author
+  // was counted as backing wording someone else had since rewritten. That is how a
+  // conclave that ran to its cap could still be labelled unanimous.
+  const backs = (p: Position, s: Position['stances'][number]) =>
+    SUPPORT.has(s.op) && s.version === p.version
+  const score = (p: Position) => p.stances.filter(s => backs(p, s)).length
   const ranked = [...live].sort((a, b) => score(b) - score(a))
   const leading = ranked[0]
 
@@ -206,14 +228,23 @@ export function summarise(roomId: string, roster: Agent[], deliberationId?: stri
  * So: show everything, and separate what this run has touched from what the room
  * was already holding, so nobody mistakes an old answer for a current one.
  */
-export function renderLedger(roomId: string, roster: Agent[], deliberationId?: string): string {
+export function renderLedger(
+  roomId: string, roster: Agent[], deliberationId?: string,
+  opts: { sealedSince?: number } = {},
+): string {
+  // A sealed round sees only what the room held before this run began, and no
+  // stances at all: anything newer was committed by a peer in this same blind round.
+  const sealed = opts.sealedSince !== undefined
   const positions = db.listPositions(roomId)
+    .filter(p => !sealed || p.createdAt < opts.sealedSince!)
   if (!positions.length) return ''
   const nameOf = (id: string) => roster.find(a => a.id === id)?.name ?? 'someone'
 
-  const inRun = deliberationId
-    ? new Set(db.listPositions(roomId, { deliberationId }).map(p => p.id))
-    : new Set(positions.map(p => p.id))
+  const inRun = sealed
+    ? new Set<string>()
+    : deliberationId
+      ? new Set(db.listPositions(roomId, { deliberationId }).map(p => p.id))
+      : new Set(positions.map(p => p.id))
 
   const render = (p: Position, withStances: boolean) => {
     const out = [`**${p.label}** (v${p.version}) — ${p.title}`]

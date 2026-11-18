@@ -143,9 +143,16 @@ export function composeContext(args: {
   ].join('\n'))
 
   const memory = add('memory', renderMemory(agent, room.projectId))
-  const ledger = add('ledger', renderLedger(room.id, roster, deliberation.id))
+  // A sealed round is written blind, and that has to include the ledger: in
+  // ping-pong, or in a round 1 repeated after an interrupt, it already holds
+  // what peers committed earlier in this very round. Only positions that existed
+  // before this run are shown, without anyone's stances.
+  const sealedRound = deliberation.sealedOpening && round === 1
+  const ledger = add('ledger', renderLedger(room.id, roster, deliberation.id,
+    sealedRound ? { sealedSince: deliberation.createdAt } : {}))
   const sources = add('sources', renderSources(room.id))
-  const rendered = renderHistory(history, roster, args.historyBudget ?? HISTORY_BUDGET_CHARS)
+  const rendered = renderHistoryWithin(history, roster, args.historyBudget ?? HISTORY_BUDGET_CHARS,
+    { currentDeliberationId: deliberation.id })
   const transcript = add('transcript', rendered.text)
   const steerText = add('steer', steers.length
     ? [`# PRIORITY — from the human researcher`,
@@ -259,8 +266,12 @@ function renderMessage(m: Message, nameOf: (m: Message) => string): string[] {
  * Only removes. Nothing is added from a round the caller excluded, so round
  * isolation is untouched.
  */
-export function renderHistoryWithin(history: Message[], roster: Agent[], budget: number): Rendered {
+export function renderHistoryWithin(
+  history: Message[], roster: Agent[], budget: number,
+  opts: { currentDeliberationId?: string } = {},
+): Rendered {
   if (!history.length) return { text: '', omitted: 0 }
+  const current = opts.currentDeliberationId
   const nameOf = (m: Message) =>
     m.authorType === 'human' ? 'Human researcher'
       : roster.find(a => a.id === m.authorId)?.name ?? 'Unknown'
@@ -270,9 +281,14 @@ export function renderHistoryWithin(history: Message[], roster: Agent[], budget:
   let used = blocks.reduce((n, _b, i) => n + size(i), 0)
 
   const keep = new Set<number>(history.map((_m, i) => i))
-  const rounds = history.map(m => m.round).filter((r): r is number => r != null)
+  // "The newest round" means this run's. Counting every message, a room's earlier
+  // run with more rounds would pin ITS last round and let the round the agent is
+  // actually answering be trimmed away.
+  const inScope = (m: Message) => !current || m.deliberationId === current
+  const rounds = history.filter(inScope).map(m => m.round).filter((r): r is number => r != null)
   const newest = rounds.length ? Math.max(...rounds) : null
-  const pinned = (m: Message) => m.authorType === 'human' || (newest != null && m.round === newest)
+  const pinned = (m: Message) =>
+    m.authorType === 'human' || (newest != null && inScope(m) && m.round === newest)
 
   // Dropped messages are not gone without trace: each leaves one line saying who
   // spoke, in which round, with what stance and the gist. That is a fraction of
@@ -288,7 +304,11 @@ export function renderHistoryWithin(history: Message[], roster: Agent[], budget:
   }
 
   const lines = ['# Discussion so far', '']
-  let lastRound: number | null = null
+  let lastRound: string | null = null
+  // Earlier deliberations in this room are shown in full but labelled, so their
+  // "Round 2" is never mistaken for this run's.
+  const earlier = (m: Message) => !!current && !!m.deliberationId && m.deliberationId !== current
+  let lastRun: string | null = null
   let run: Message[] = []
   let omitted = 0
   const flush = () => {
@@ -308,11 +328,22 @@ export function renderHistoryWithin(history: Message[], roster: Agent[], budget:
     run = []
   }
   history.forEach((m, i) => {
+    // Label the run before anything from it, kept or digested, so a trimmed
+    // earlier run is still recognisable as earlier.
+    if (current && m.deliberationId && m.deliberationId !== lastRun) {
+      flush()
+      lines.push(earlier(m)
+        ? '## Earlier in this room: a previous deliberation, on its own question'
+        : '## This deliberation', '')
+      lastRun = m.deliberationId
+      lastRound = null
+    }
     if (!keep.has(i)) { run.push(m); omitted++; return }
     flush()
-    if (m.round !== lastRound && m.round != null) {
+    const key = `${m.deliberationId}|${m.round}`
+    if (m.round != null && key !== lastRound) {
       lines.push(`## Round ${m.round}`, '')
-      lastRound = m.round
+      lastRound = key
     }
     lines.push(blocks[i])
   })
@@ -320,6 +351,3 @@ export function renderHistoryWithin(history: Message[], roster: Agent[], budget:
   return { text: lines.join('\n'), omitted }
 }
 
-function renderHistory(history: Message[], roster: Agent[], budget: number): Rendered {
-  return renderHistoryWithin(history, roster, budget)
-}

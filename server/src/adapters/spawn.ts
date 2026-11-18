@@ -107,6 +107,14 @@ export async function* streamProcess(
     return
   }
 
+  // Aborted before it started (Stop, then synthesis; Ctrl-C between turns). An
+  // abort listener never fires for a signal that is already aborted, so this
+  // used to launch a full, uncancellable CLI run nobody was waiting for.
+  if (signal.aborted) {
+    yield { type: 'error', message: `${cmd} was not started: the turn was already cancelled` }
+    return
+  }
+
   const child = spawn(bin, args, {
     cwd: opts.cwd,
     // stdin must be closed: codex otherwise blocks on "Reading additional input from stdin".

@@ -13,7 +13,7 @@
 import type { AdapterEvent, BrainAdapter, TurnRequest } from './types.ts'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { capture, clean, streamProcess, which } from './spawn.ts'
+import { capture, clean, streamProcess, which, type StreamOpts } from './spawn.ts'
 import { DATA_PATH } from '../db.ts'
 
 export const cursorAdapter: BrainAdapter = {
@@ -92,10 +92,20 @@ function runCursor(req: TurnRequest, signal: AbortSignal): AsyncIterable<Adapter
   // UI labels it as such. --print alone would grant write and bash.
   args.push(...cursorTierArgs(req.tier))
 
-  let text = ''
-
   return streamProcess('cursor-agent', args, signal, {
     cwd: workspace,
+    ...cursorTranslator(),
+  })
+}
+
+/**
+ * cursor-agent's stream-json lines as AdapterEvents. Exported so the translation
+ * can be tested from recorded lines, without spawning anything.
+ */
+export function cursorTranslator(): Pick<StreamOpts, 'onLine' | 'onClose'> {
+  let text = ''
+  let failed: string | null = null
+  return {
     onLine: (raw, push) => {
       const ev = raw as any
       if (ev.type === 'thinking' && ev.subtype === 'delta') {
@@ -110,18 +120,26 @@ function runCursor(req: TurnRequest, signal: AbortSignal): AsyncIterable<Adapter
           }
         }
       } else if (ev.type === 'result') {
-        if (typeof ev.result === 'string' && ev.result) text = ev.result
-        if (ev.is_error) push({ type: 'error', message: String(ev.result ?? 'cursor-agent error') })
+        // An error result carries the error message in `result`. It used to be
+        // copied into the reply first, so an auth or quota failure was stored as
+        // the agent's answer, and shown twice.
+        if (ev.is_error) {
+          failed = String(ev.result || 'cursor-agent error')
+          push({ type: 'error', message: failed })
+        } else if (typeof ev.result === 'string' && ev.result) {
+          text = ev.result
+        }
       }
     },
     onClose: (code, stderr, push) => {
       if (!text) {
-        push({ type: 'error', message: stderr.trim().slice(0, 400) || `cursor-agent exited ${code}` })
+        // Said once: an error result has already been pushed.
+        if (!failed) push({ type: 'error', message: stderr.trim().slice(0, 400) || `cursor-agent exited ${code}` })
       } else {
         // No structured output: the scheduler extracts JSON from the prose and
         // degrades cleanly if there is none.
         push({ type: 'final', structured: null, text })
       }
     },
-  })
+  }
 }

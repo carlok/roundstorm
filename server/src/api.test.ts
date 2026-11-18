@@ -214,3 +214,20 @@ test('a rejected async handler becomes a 500 instead of hanging the request', as
     srv.close()
   }
 })
+
+test('an agent in a running deliberation cannot be deleted from under it', async () => {
+  const r = room('busy-room')
+  const agentId = r.memberIds[0]
+  const d = db.createDeliberation({
+    roomId: r.id, mode: 'deliberation', rounds: 2, style: 'parallel', sealedOpening: false,
+    status: 'running', currentRound: 1, question: 'q', tier: 'reasoning',
+  } as never)
+  const del = () => fetch(`${origin}/api/agents/${agentId}`, { method: 'DELETE' })
+  const res = await del()
+  assert.equal(res.status, 409)
+  assert.match((await res.json()).error, /running deliberation/)
+  assert.ok(db.getAgent(agentId), 'the agent was deleted anyway')
+
+  db.updateDeliberation(d.id, { status: 'complete' })
+  assert.equal((await del()).status, 200)
+})

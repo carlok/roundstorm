@@ -33,7 +33,10 @@ const RESULT_SCHEMA = {
   additionalProperties: false,
 } as const
 
-export async function synthesise(deliberationId: string, signal: AbortSignal): Promise<ResultCard | null> {
+export async function synthesise(
+  deliberationId: string, signal: AbortSignal,
+  opts: { conclave?: { reached: boolean } } = {},
+): Promise<ResultCard | null> {
   const d = db.getDeliberation(deliberationId)
   if (!d) return null
   const room = db.getRoom(d.roomId)
@@ -44,7 +47,7 @@ export async function synthesise(deliberationId: string, signal: AbortSignal): P
   if (!messages.length) return null
 
   const ledger = summarise(d.roomId, roster, d.id)
-  const level = resolveLevel(d, ledger.level)
+  const level = resolveLevel(d, ledger.level, opts.conclave)
 
   let costUsd: number | null = null
   const card = await narrate({
@@ -76,10 +79,20 @@ export async function synthesise(deliberationId: string, signal: AbortSignal): P
   return card
 }
 
-/** Conclave overrides the ordinary vocabulary — and must be able to report failure. */
-function resolveLevel(d: Deliberation, computed: ConsensusLevel): ConsensusLevel {
+/**
+ * Conclave overrides the ordinary vocabulary, and must be able to report failure.
+ *
+ * The conclave's own verdict wins when there is one. Re-deriving it from the
+ * general summary let the card say "reached" for a conclave that had just run
+ * to its cap: that count did not check versions, so an assert made against v1
+ * still backed v2 after someone else revised it.
+ */
+function resolveLevel(
+  d: Deliberation, computed: ConsensusLevel, conclave?: { reached: boolean },
+): ConsensusLevel {
   if (d.mode !== 'conclave') return computed
-  return computed === 'strong_consensus' ? 'conclave_reached' : 'conclave_failed'
+  const reached = conclave ? conclave.reached : computed === 'strong_consensus'
+  return reached ? 'conclave_reached' : 'conclave_failed'
 }
 
 /**

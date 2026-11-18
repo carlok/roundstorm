@@ -20,6 +20,7 @@
 import type { Agent, Deliberation, Message, Room } from '../types.ts'
 import * as db from '../db.ts'
 import { bus } from '../bus.ts'
+import { historyFor } from './history.ts'
 
 export interface TurnRunner {
   (args: {
@@ -28,6 +29,22 @@ export interface TurnRunner {
     signal: AbortSignal; extraInstruction?: string
   }): Promise<void>
 }
+
+/**
+ * What the scheduler lends a conclave so it behaves like any other run toward
+ * the human: steers reach the agents and are consumed, and "Interrupt now"
+ * repeats the round instead of ending the conclave as if it had failed.
+ * Optional so the conclave can be driven on its own in tests.
+ */
+export interface ConclaveHooks {
+  pendingSteers?: (roomId: string) => Message[]
+  markSteersConsumed?: (steers: Message[]) => void
+  /** A fresh signal if an interrupt is pending (and clears it), else null. */
+  takeInterrupt?: () => AbortSignal | null
+}
+
+/** `rounds` is the emergency maximum, with a floor so a conclave can negotiate. */
+export const conclaveCap = (rounds: number | null | undefined): number => Math.max(4, rounds ?? 8)
 
 export interface ConclaveOutcome {
   reached: boolean
@@ -38,13 +55,21 @@ export interface ConclaveOutcome {
 }
 
 export async function runConclave(
-  deliberationId: string, signal: AbortSignal, runTurn: TurnRunner,
+  deliberationId: string, signal: AbortSignal, runTurn: TurnRunner, hooks: ConclaveHooks = {},
 ): Promise<ConclaveOutcome> {
-  const cap = () => {
-    const d = db.getDeliberation(deliberationId)
-    // `rounds` is the emergency maximum here, not a target. Keep a floor so a
-    // conclave started at "3 rounds" still gets room to actually negotiate.
-    return Math.max(4, d?.rounds ?? 8)
+  // `rounds` is the emergency maximum here, not a target. Keep a floor so a
+  // conclave started at "3 rounds" still gets room to actually negotiate.
+  const cap = () => conclaveCap(db.getDeliberation(deliberationId)?.rounds)
+
+  /** After an abort: a fresh signal if it was an interrupt (repeat the round), else null (stop). */
+  const restart = (round: number): AbortSignal | null => {
+    const next = hooks.takeInterrupt?.() ?? null
+    if (next) {
+      db.logEvent('round.restarted', {
+        roomId: db.getDeliberation(deliberationId)?.roomId, deliberationId, payload: { round },
+      })
+    }
+    return next
   }
 
   let outcome: ConclaveOutcome = {
@@ -67,25 +92,41 @@ export async function runConclave(
     const chair = roster[(round - 1) % roster.length]
     const devil = roster[round % roster.length]
 
-    const history = db.listMessages(d.roomId, false).filter(m => m.round == null || m.round < round)
+    // Steers used to be passed as [] here: a human message during a conclave was
+    // never shown to anyone as a priority, and never consumed either, so it then
+    // led the room's NEXT deliberation.
+    const steers = hooks.pendingSteers?.(d.roomId) ?? []
+    const history = historyFor(d, round)
 
     // Chair first: the room needs something concrete to attack.
     await runTurn({
-      agent: chair, room, roster, deliberation: d, round, history, steers: [],
+      agent: chair, room, roster, deliberation: d, round, history, steers,
       sealed: false, signal,
       extraInstruction: chairInstruction(round),
     })
-    if (signal.aborted) break
+    if (signal.aborted) {
+      const next = restart(round)
+      if (!next) break
+      signal = next; round -= 1; continue
+    }
 
-    const afterChair = db.listMessages(d.roomId, false)
+    // This run's history including the chair's new draft. Unfiltered, it carried
+    // every message in the room, and under budget pressure the trimmer could keep
+    // an older run's last round instead of the proposal being voted on.
+    const afterChair = historyFor(d, round, { sameRound: true })
     const rest = roster.filter(a => a.id !== chair.id)
 
     await Promise.all(rest.map(agent => runTurn({
       agent, room, roster, deliberation: d, round,
-      history: afterChair, steers: [], sealed: false, signal,
+      history: afterChair, steers, sealed: false, signal,
       extraInstruction: agent.id === devil.id ? DEVIL_INSTRUCTION : endorseInstruction(),
     })))
-    if (signal.aborted) break
+    if (signal.aborted) {
+      const next = restart(round)
+      if (!next) break
+      signal = next; round -= 1; continue
+    }
+    hooks.markSteersConsumed?.(steers)
 
     const check = tally(d.roomId, roster, d.id)
     outcome = { ...check, rounds: round }

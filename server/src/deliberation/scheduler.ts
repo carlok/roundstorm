@@ -22,6 +22,7 @@ import { composeContext } from './context.ts'
 import { applyPositionOps } from './ledger.ts'
 import { runConclave } from './conclave.ts'
 import { synthesise } from './synthesis.ts'
+import { historyFor } from './history.ts'
 import { TURN_SCHEMA, coerceTurn, extractJson, stripJsonBlock } from './contract.ts'
 
 interface Running {
@@ -32,8 +33,19 @@ interface Running {
 
 const running = new Map<string, Running>()
 
-/** Per-turn deadline. Generous, because a tool-using turn can legitimately be slow. */
-export const TURN_TIMEOUT_MS = Number(process.env.ROUNDSTORM_TURN_TIMEOUT_MS ?? 6 * 60_000)
+/**
+ * Per-turn deadline. Generous, because a tool-using turn can legitimately be slow.
+ *
+ * Parsed, not cast: `Number("6m")` is NaN, `setTimeout(fn, NaN)` fires after a
+ * millisecond, and every turn of every run then "timed out" with nothing on screen
+ * saying why. Anything that is not a whole number of at least one second falls back
+ * to the default.
+ */
+export function parseTurnTimeout(raw: string | undefined): number {
+  const n = Number(raw)
+  return raw !== undefined && raw.trim() !== '' && Number.isInteger(n) && n >= 1_000 ? n : 6 * 60_000
+}
+export const TURN_TIMEOUT_MS = parseTurnTimeout(process.env.ROUNDSTORM_TURN_TIMEOUT_MS)
 
 
 export function stopDeliberation(id: string) {
@@ -105,12 +117,23 @@ export async function startDeliberation(deliberation: Deliberation) {
   emitDeliberation(deliberation.id)
 
   try {
+    let conclave: { reached: boolean } | undefined
     if (deliberation.mode === 'conclave') {
-      await runConclave(deliberation.id, controller.signal, runTurn)
+      conclave = await runConclave(deliberation.id, controller.signal, runTurn, {
+        pendingSteers, markSteersConsumed,
+        takeInterrupt: () => takeInterrupt(deliberation.id),
+      })
     } else {
       await runRounds(deliberation.id, running.get(deliberation.id)!.controller.signal)
     }
-    await synthesise(deliberation.id, controller.signal)
+    // The CURRENT controller, not the one this run started with: an interrupt
+    // replaces it, and the original is already aborted, so synthesis after an
+    // interrupt was cancelled before it began and every such run got the bare
+    // fallback card. Bounded by the turn deadline too, so a synthesiser that hangs
+    // cannot leave the deliberation `running` for ever.
+    const current = running.get(deliberation.id)?.controller.signal ?? controller.signal
+    await synthesise(deliberation.id,
+      AbortSignal.any([current, AbortSignal.timeout(TURN_TIMEOUT_MS)]), { conclave })
   } catch (err) {
     db.logEvent('deliberation.failed', {
       roomId: deliberation.roomId, deliberationId: deliberation.id,
@@ -119,6 +142,12 @@ export async function startDeliberation(deliberation: Deliberation) {
     db.updateDeliberation(deliberation.id, { status: 'failed', endedAt: Date.now() })
   } finally {
     running.delete(deliberation.id)
+    // A steer that arrived after the last round's snapshot (during the final round,
+    // during synthesis, while stopping) was never shown to anyone, and its
+    // `priority` flag would otherwise make it the first thing the NEXT deliberation
+    // in this room is told to address, possibly days later. It stays in the
+    // transcript, where the next run still sees it as an ordinary message.
+    markSteersConsumed(pendingSteers(deliberation.roomId, Infinity))
     const d = db.getDeliberation(deliberation.id)
     if (d && (d.status === 'running' || d.status === 'stopping')) {
       db.updateDeliberation(deliberation.id, {
@@ -154,7 +183,7 @@ async function runRounds(deliberationId: string, signal: AbortSignal) {
 
     // Everything visible before this round starts. In parallel style this snapshot
     // is shared by every agent in the round; nothing produced now leaks backwards.
-    const baseHistory = db.listMessages(d.roomId, false).filter(m => m.round == null || m.round < round)
+    const baseHistory = historyFor(d, round)
     const steers = pendingSteers(d.roomId)
 
     for (const a of roster) setActivity(room.id, a.id, 'waiting', 'Waiting', round)
@@ -167,8 +196,7 @@ async function runRounds(deliberationId: string, signal: AbortSignal) {
       const order = roster.slice(round % roster.length).concat(roster.slice(0, round % roster.length))
       for (const agent of order) {
         if (signal.aborted) break
-        const history = db.listMessages(d.roomId, false)
-          .filter(m => m.round == null || m.round < round || (m.round === round && m.deliberationId === d.id))
+        const history = historyFor(d, round, { sameRound: true })
         await runTurn({ agent, room, roster, deliberation: d, round, history, steers, sealed, signal })
       }
     }
@@ -186,11 +214,9 @@ async function runRounds(deliberationId: string, signal: AbortSignal) {
     // included, which is what the button promises. Reaching this with the flag
     // still set used to mean the abort simply ended the deliberation. The steer
     // must survive too, so this returns before markSteersConsumed.
-    const entry = running.get(deliberationId)
-    if (entry?.interrupt) {
-      entry.interrupt = false
-      entry.controller = new AbortController()
-      signal = entry.controller.signal
+    const restarted = takeInterrupt(deliberationId)
+    if (restarted) {
+      signal = restarted
       db.logEvent('round.restarted', {
         roomId: db.getDeliberation(deliberationId)?.roomId, deliberationId, payload: { round },
       })
@@ -204,6 +230,18 @@ async function runRounds(deliberationId: string, signal: AbortSignal) {
 }
 
 /**
+ * If an interrupt is pending, clear it and hand back the replacement signal the
+ * repeated round should run under. Null when there is nothing to restart.
+ */
+function takeInterrupt(deliberationId: string): AbortSignal | null {
+  const entry = running.get(deliberationId)
+  if (!entry?.interrupt) return null
+  entry.interrupt = false
+  entry.controller = new AbortController()
+  return entry.controller.signal
+}
+
+/**
  * Human messages the agents have not been shown yet (plan §8).
  *
  * `priority` is the unconsumed flag. It used to be tracked in a module-level Set
@@ -213,13 +251,13 @@ async function runRounds(deliberationId: string, signal: AbortSignal) {
  * was quietly degraded. Consuming it in the database also survives a restart,
  * which the Set never could.
  */
-function pendingSteers(roomId: string): Message[] {
+export function pendingSteers(roomId: string, limit = 3): Message[] {
   return db.listMessages(roomId)
     .filter(m => m.authorType === 'human' && m.priority && m.round == null)
-    .slice(-3)
+    .slice(-limit)
 }
 
-function markSteersConsumed(steers: Message[]) {
+export function markSteersConsumed(steers: Message[]) {
   for (const s of steers) db.updateMessage(s.id, { priority: false })
 }
 
@@ -355,12 +393,18 @@ export async function runTurn(args: {
     signal.removeEventListener('abort', onOuterAbort)
   }
 
-  if (timedOut && !structured && !text) {
+  // A turn cut off by the deadline or by Stop/Interrupt is not a turn, even if
+  // some text had streamed: "Let me search for that..." from an agent that then
+  // hung used to be stored as its answer for the round, marked complete. Only a
+  // structured result means the brain actually finished. What was dropped is
+  // logged, so it is not lost silently.
+  if (timedOut && !structured) {
     const secs = Math.round(TURN_TIMEOUT_MS / 1000)
     setActivity(room.id, agent.id, 'error', `Timed out after ${secs}s`, round)
     db.logEvent('turn.timeout', {
       roomId: room.id, deliberationId: deliberation.id, agentId: agent.id,
-      payload: { round, ms: Date.now() - started, brain: agent.brain, model: agent.model },
+      payload: { round, ms: Date.now() - started, brain: agent.brain, model: agent.model,
+                 discardedChars: text.length },
     })
     const m = db.insertMessage({
       roomId: room.id, authorType: 'system', authorId: agent.id,
@@ -371,10 +415,11 @@ export async function runTurn(args: {
     return
   }
 
-  if (signal.aborted && !structured && !text) {
+  if (signal.aborted && !structured) {
     setActivity(room.id, agent.id, 'idle', 'Cancelled', round)
     db.logEvent('turn.cancelled', {
-      roomId: room.id, deliberationId: deliberation.id, agentId: agent.id, payload: { round },
+      roomId: room.id, deliberationId: deliberation.id, agentId: agent.id,
+      payload: { round, discardedChars: text.length },
     })
     return
   }
@@ -469,9 +514,17 @@ export async function runTurn(args: {
     agentId: agent.id, state: 'done', detail: 'Committed', round, startedAt: null } })
 }
 
-/** `@Bruno` — word-boundary match so "Brunod" does not count. */
-function mentions(body: string, name: string): boolean {
-  return new RegExp(`@${name}\\b`, 'i').test(body)
+/**
+ * `@Bruno`, but not `@Brunod`.
+ *
+ * The name is matched literally. It used to be pasted into a RegExp, so an agent
+ * called "C++ Expert" threw "Nothing to repeat" the moment any steer was pending,
+ * outside the turn's try block: the whole deliberation was marked failed while the
+ * other agents' turns kept running and billing.
+ */
+export function mentions(body: string, name: string): boolean {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(`@${escaped}(?![\\p{L}\\p{N}_])`, 'iu').test(body)
 }
 
 /** Agents hallucinate ids; only accept one that names a message actually in view. */
@@ -493,7 +546,7 @@ const RANK = { reasoning: 0, research: 1, workstation: 2, full: 3 } as const
 const rank = (t: string): number => (isTier(t) ? RANK[t] : 0)
 
 /** A room can never grant an agent more than its own ceiling (plan §9). */
-function lowerTier(a: Room['tier'], b: Agent['tierCeiling']) {
+export function lowerTier(a: Room['tier'], b: Agent['tierCeiling']) {
   return rank(a) <= rank(b) ? a : b
 }
 
@@ -508,7 +561,7 @@ function lowerTier(a: Room['tier'], b: Agent['tierCeiling']) {
  * machine. So a room asking for file access with no working directory set is
  * downgraded to `research` rather than quietly given more than it asked for.
  */
-function resolveWorkspace(room: Room, tier: Tier):
+export function resolveWorkspace(room: Room, tier: Tier):
     { tier: Tier; workingDir: string | null; downgraded: boolean; reason?: string } {
   if (rank(tier) < rank('workstation')) return { tier, workingDir: null, downgraded: false }
   const dir = db.getProject(room.projectId)?.workingDir ?? null
