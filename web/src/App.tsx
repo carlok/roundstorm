@@ -56,9 +56,13 @@ export function App() {
     return rs.messages.filter(m => m.body.toLowerCase().includes(q))
   }, [query, rs.messages])
 
+  // One timer for the toast: a second flash used to be cut short by the first
+  // one's timer clearing it.
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const flash = useCallback((text: string) => {
     setToast(text)
-    setTimeout(() => setToast(null), 1600)
+    clearTimeout(toastTimer.current)
+    toastTimer.current = setTimeout(() => setToast(null), 1600)
   }, [])
 
   /**

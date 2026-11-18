@@ -44,6 +44,8 @@ export function makeCompatAdapter(spec: CompatSpec): BrainAdapter {
     // not the fields, so the prompt still has to carry the contract — the same
     // prompt-and-parse path cursor-agent uses.
     schemaEnforced: spec.responseFormat === 'json_schema',
+    // Without json_schema, run() appends its own "single JSON object" instruction.
+    promptsOwnContract: spec.responseFormat !== 'json_schema',
     strictSchema: spec.responseFormat === 'json_schema',
     supportsSystemPrompt: true,
     note: spec.note,
@@ -122,7 +124,8 @@ ${JSON.stringify(req.schema)}`
       signal,
       headers,
       body: JSON.stringify({
-        model: req.model ?? spec.staticModels?.[0]?.id,
+        // `||`: an agent with no model chosen stores '' and sent it verbatim.
+        model: req.model || spec.staticModels?.[0]?.id,
         messages: [
           { role: 'system', content: system },
           { role: 'user', content: req.userPrompt },

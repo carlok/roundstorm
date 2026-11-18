@@ -13,6 +13,10 @@ import * as db from '../db.ts'
 import { bus } from '../bus.ts'
 import { getAdapter, schemaFor } from '../adapters/registry.ts'
 import { LEVEL_LABEL, summarise } from './ledger.ts'
+import { renderHistoryWithin } from './context.ts'
+
+/** Characters of transcript the synthesiser is given. */
+const SYNTHESIS_TRANSCRIPT_CHARS = 90_000
 import { MODE_LABEL } from './context.ts'
 import { extractJson } from './contract.ts'
 
@@ -147,11 +151,12 @@ async function narrate(args: {
   if (!adapter) return base
 
   const nameOf = (id: string | null) => roster.find(a => a.id === id)?.name ?? 'Human'
-  const transcript = messages
-    .filter(m => m.authorType !== 'system')
-    .map(m => `### ${nameOf(m.authorId)}${m.round ? ` · Round ${m.round}` : ''}\n${m.body}`)
-    .join('\n\n')
-    .slice(0, 90_000)
+  // Same budgeted renderer the turns use. A plain .slice(0, 90_000) kept the
+  // OPENING of a long discussion and cut the final round, the part a rapporteur
+  // most needs: now the last round is pinned and older turns are digested.
+  const transcript = renderHistoryWithin(
+    messages.filter(m => m.authorType !== 'system'), roster, SYNTHESIS_TRANSCRIPT_CHARS,
+    { currentDeliberationId: d.id }).text
 
   const sources = db.listSources(d.roomId)
 

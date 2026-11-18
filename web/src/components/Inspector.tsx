@@ -27,6 +27,13 @@ export function Inspector({ positions, sources, roster, roomId, agentById, onCit
   const [events, setEvents] = useState<LogEntry[]>([])
   const [backingUp, setBackingUp] = useState(false)
   const [backupResult, setBackupResult] = useState<string | null>(null)
+  // Where the database actually is. The note used to hardcode the macOS path,
+  // which is wrong on Linux and Windows and under ROUNDSTORM_DATA.
+  const [dataDir, setDataDir] = useState<string | null>(null)
+  useEffect(() => {
+    api('/health').then(r => r.json()).then(h => setDataDir(typeof h?.data === 'string' ? h.data : null))
+      .catch(() => setDataDir(null))
+  }, [])
 
   const backup = async () => {
     setBackingUp(true)
@@ -165,8 +172,9 @@ export function Inspector({ positions, sources, roster, roomId, agentById, onCit
             {backupResult && <p className="backup-done">{backupResult}</p>}
             <p className="muted backup-note">
               A consistent snapshot of every room, transcript, position, source and
-              memory card, saved to your Downloads folder. Restore by putting it back as
-              <code>~/Library/Application Support/Roundstorm/roundstorm.db</code>.
+              memory card, saved to your Downloads folder. Restore by quitting Roundstorm
+              and putting it back as <code>roundstorm.db</code> in
+              {dataDir ? <> <code>{dataDir}</code>.</> : ' the data folder (see the README).'}
             </p>
             {events.map(e => (
               <div key={e.id} className="logline">

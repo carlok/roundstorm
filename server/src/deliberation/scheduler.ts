@@ -309,6 +309,7 @@ export async function runTurn(args: {
   const ctx = composeContext({
     agent, room, roster, deliberation, round, history, steers,
     schemaEnforced: adapter.schemaEnforced,
+    ownContract: adapter.promptsOwnContract,
     extraInstruction: args.extraInstruction,
     // An @mention scopes a steer: everyone sees it, only the named agent is
     // asked to act on it (plan §8).

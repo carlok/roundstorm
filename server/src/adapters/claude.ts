@@ -61,10 +61,10 @@ export const claudeAdapter: BrainAdapter = {
 
   async listModels() {
     return [
-      { id: 'claude-opus-5', label: 'Claude Opus 5' },
-      { id: 'claude-sonnet-5', label: 'Claude Sonnet 5' },
-      { id: 'claude-fable-5', label: 'Claude Fable 5' },
-      { id: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5' },
+      { id: 'claude-opus-5-5', label: 'Claude Opus 5.5' },
+      { id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5' },
+      { id: 'claude-fable-5-1', label: 'Claude Fable 5.1' },
+      { id: 'claude-haiku-5-5', label: 'Claude Haiku 5.5' },
     ]
   },
 

@@ -12,6 +12,7 @@ import type { Agent, Deliberation, Message, Mode, Room } from '../types.ts'
 import { personaByKey } from './personas.ts'
 import { PROMPT_CONTRACT } from './contract.ts'
 import { renderLedger } from './ledger.ts'
+import { conclaveCap } from './conclave.ts'
 import { listMemory, listSources } from '../db.ts'
 
 export const MODE_LABEL: Record<Mode, string> = {
@@ -93,6 +94,8 @@ export function composeContext(args: {
   schemaEnforced: boolean
   extraInstruction?: string
   mentioned?: boolean
+  /** The adapter appends its own output-format instruction (see BrainAdapter.promptsOwnContract). */
+  ownContract?: boolean
   /** Characters of transcript allowed; defaults to HISTORY_BUDGET_CHARS. */
   historyBudget?: number
 }): ComposedContext {
@@ -125,7 +128,10 @@ export function composeContext(args: {
     `- Length: a few tight paragraphs. Nobody reads a wall of text five times per round.`,
     `- Do not restate the question back at the room. Do not summarise the discussion unless asked.`,
   ]
-  if (!schemaEnforced) systemParts.push('', PROMPT_CONTRACT)
+  // An adapter that writes its own output instruction (the OpenAI-compatible ones
+  // without json_schema) must not also get this one: DeepSeek was told both
+  // "message, then a fenced block" and "a single JSON object and nothing else".
+  if (!schemaEnforced && !args.ownContract) systemParts.push('', PROMPT_CONTRACT)
   const systemPrompt = systemParts.filter(Boolean).join('\n')
 
   const sections: { name: string; chars: number }[] = []
@@ -139,7 +145,8 @@ export function composeContext(args: {
     deliberation.question,
     ``,
     `Mode: ${MODE_LABEL[deliberation.mode]} — ${MODE_BLURB[deliberation.mode]}`,
-    `Round ${round} of ${deliberation.rounds}. Style: ${deliberation.style === 'parallel' ? 'parallel (everyone answers at once)' : 'ping-pong (sequential)'}.`,
+    // A conclave's round count is a cap with a floor, so "Round 4 of 3" was possible.
+    `Round ${round} of ${deliberation.mode === 'conclave' ? `at most ${conclaveCap(deliberation.rounds)}` : deliberation.rounds}. Style: ${deliberation.style === 'parallel' ? 'parallel (everyone answers at once)' : 'ping-pong (sequential)'}.`,
   ].join('\n'))
 
   const memory = add('memory', renderMemory(agent, room.projectId))

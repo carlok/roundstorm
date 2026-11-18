@@ -71,7 +71,7 @@ export function StartSheet({ room, roster, modes, lastQuestion, preset, onStart,
 
         <label className="field">
           <span>Rounds — {rounds}</span>
-          <input type="range" min={1} max={10} value={rounds}
+          <input type="range" min={1} max={20} value={rounds}
                  onChange={e => setRounds(Number(e.target.value))} />
         </label>
 

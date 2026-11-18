@@ -56,6 +56,14 @@ export interface BrainInfo {
 }
 
 let cache: BrainInfo[] | null = null
+let cachedAt = 0
+
+/**
+ * How long a brain list is trusted. It used to be cached until restart, so a model
+ * newly pulled into LM Studio or Ollama, or a new agy/cursor model, did not appear
+ * in the picker until the daemon was restarted.
+ */
+export const BRAIN_CACHE_MS = 5 * 60_000
 
 /**
  * Adapter self-test plus multiplexer enumeration (plan §19.5, §20).
@@ -65,8 +73,9 @@ let cache: BrainInfo[] | null = null
  * vanishing from that list should degrade an agent visibly here, at boot, rather
  * than fail three rounds into a deliberation.
  */
-export async function probeBrains(force = false): Promise<BrainInfo[]> {
-  if (cache && !force) return cache
+export async function probeBrains(force = false, now = Date.now()): Promise<BrainInfo[]> {
+  if (cache && !force && now - cachedAt < BRAIN_CACHE_MS) return cache
+  cachedAt = now
 
   cache = await Promise.all(ADAPTERS.map(async a => {
     // An adapter that *throws* is a different thing from a CLI that is not
