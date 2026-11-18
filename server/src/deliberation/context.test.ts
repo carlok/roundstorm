@@ -258,3 +258,18 @@ test('under pressure the pin stays on THIS run\'s newest round, not an older run
   assert.match(out.text, /Earlier in this room/)
   assert.match(out.text, /## This deliberation/)
 })
+
+test('a conclave header states its real cap, never "Round 4 of 3"', () => {
+  const ctx = composeContext({
+    agent: roster[0], room, roster, deliberation: delib({ mode: 'conclave', rounds: 3, currentRound: 4 }),
+    round: 4, history: [], steers: [], schemaEnforced: true, extraInstruction: 'chair',
+  })
+  assert.match(ctx.userPrompt, /Round 4 of at most 4\./)
+})
+
+test('an adapter that writes its own output format does not also get the prompted contract', () => {
+  const base = { agent: roster[0], room, roster, deliberation: delib(), round: 1, history: [], steers: [], schemaEnforced: false }
+  assert.match(composeContext(base).systemPrompt, /## Output format/)
+  assert.doesNotMatch(composeContext({ ...base, ownContract: true }).systemPrompt, /## Output format/,
+    'two contradictory output instructions in one prompt')
+})

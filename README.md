@@ -250,8 +250,8 @@ persona: start from a template that nearly works, then edit it.
 Deleting a researcher removes it from every room but leaves its past messages in
 the transcripts. A record that loses its authors is worthless.
 
-**A room.** `+` next to **Rooms**, or the `Cast` button in the room header to
-change an existing one. Name it, pick any set of researchers, set what they are
+**A room.** `+` next to **Rooms**, or **Room ⌄ → Edit cast…** in the room header
+to change an existing one. Name it, pick any set of researchers, set what they are
 allowed to do. One researcher makes it a direct message — plain chat, no rounds.
 The sheet tells you whether you have built a single-brain or a mixed-brain cast,
 since those are different experiments.
@@ -278,6 +278,28 @@ The lab also checks whether the question was contested at all. "Nobody changed
 their mind" is a misleading finding if nobody disagreed in the first place, so
 that case is reported as an experiment-design problem rather than a result about
 the brains.
+
+## Environment variables
+
+Everything has a working default; none of these needs setting for normal use.
+
+| Variable | Default | What it does |
+|---|---|---|
+| `ROUNDSTORM_DATA` | per platform, see above | Where the database lives |
+| `ROUNDSTORM_PORT` | `8787` | Daemon port (`PORT` is also accepted) |
+| `ROUNDSTORM_HOST` | `127.0.0.1` | Interface to listen on. Anything else exposes the API to your network; read [Security](#security) first |
+| `ROUNDSTORM_TOKEN` | unset (the desktop app sets one per launch) | Require this bearer token on `/api` and `/ws` |
+| `ROUNDSTORM_ALLOWED_ORIGINS` | none | Extra browser origins allowed to call the API, comma-separated |
+| `ROUNDSTORM_ALLOWED_HOSTS` | none | Extra `Host` names accepted, comma-separated |
+| `ROUNDSTORM_TURN_TIMEOUT_MS` | `360000` (6 min) | Per-turn deadline, and the synthesiser's. Whole milliseconds, at least 1000; anything else falls back to the default |
+| `ROUNDSTORM_HISTORY_CHARS` | `60000` | Most transcript characters one turn carries before older messages are reduced to one line each (minimum 2000) |
+| `ROUNDSTORM_BACKUP_DIR` | `~/Downloads` | Where **Back up everything** writes |
+| `ROUNDSTORM_EMBED_URL` | `http://127.0.0.1:1234/v1` | OpenAI-compatible embeddings endpoint for semantic search and position de-duplication |
+| `ROUNDSTORM_EMBED_MODEL` | `text-embedding-nomic-embed-text-v1.5` | Embedding model. Changing it re-indexes; vectors from different models are never compared |
+| `LMSTUDIO_BASE_URL` | `http://127.0.0.1:1234/v1` | LM Studio brain |
+| `OLLAMA_BASE_URL` | `http://127.0.0.1:11434/v1` | Ollama brain |
+| `DEEPSEEK_BASE_URL` | `https://api.deepseek.com` | DeepSeek brain |
+| `DEEPSEEK_API_KEY` | unset | Required for the DeepSeek brain |
 
 ## Storage
 
@@ -312,7 +334,7 @@ node dist-server/cli.mjs examples/conclave.jsonc
 {
   "room": { "name": "Sensor choice", "tier": "reasoning" },
   "agents": [
-    { "name": "Alice", "persona": "mathematician",   "brain": "claude", "model": "claude-haiku-4-5-20251001" },
+    { "name": "Alice", "persona": "mathematician",   "brain": "claude", "model": "claude-haiku-5-5" },
     { "name": "Bruno", "persona": "skeptic",         "brain": "codex" },
     { "name": "Curie", "persona": "experimentalist", "brain": "agy", "model": "gemini-3.5-flash-low" }
   ],

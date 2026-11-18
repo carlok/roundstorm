@@ -397,3 +397,18 @@ test('a sealed ping-pong round does not leak the first speaker\'s position throu
       `${n} saw ${other}'s sealed position`)
   }
 })
+
+test('the synthesiser is given the final round of a long discussion, not just its opening', async () => {
+  // A plain .slice(0, 90_000) kept the opening and cut the closing round.
+  const { room: r, agents, stubs, cleanup } = room(['A'], () => ({ turn: synthOrTurn }))
+  const d = deliberation(r.id, { rounds: 6, status: 'complete' })
+  for (let round = 1; round <= 6; round++) {
+    db.insertMessage({ roomId: r.id, authorType: 'agent', authorId: agents[0].id,
+      body: `ROUND-${round}-OPENING ` + 'z'.repeat(25_000), round, deliberationId: d.id })
+  }
+  await synthesise(d.id, new AbortController().signal)
+  cleanup()
+  const call = stubs.get('A')!.calls.find(rapporteur)!
+  assert.ok(call.userPrompt.includes('ROUND-6-OPENING ' + 'z'.repeat(1_000)), 'the final round was cut')
+  assert.ok(call.userPrompt.length < 140_000, `synthesis prompt is ${call.userPrompt.length} chars`)
+})

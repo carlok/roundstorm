@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiUrl, wsUrl } from './lib/api.ts'
+import { reconnectDelay } from './lib/reconnect.ts'
 import type {
   Agent, AgentActivity, BrainInfo, Deliberation, LedgerSummary, Message, ModeInfo,
   Persona, Position, Project, ResultCard, Room, ServerEvent, Source,
@@ -109,13 +110,23 @@ export function useRoundstorm() {
     let ws: WebSocket
     let closed = false
     let retry: ReturnType<typeof setTimeout>
+    let failures = 0
+    let opened = false
 
     const connect = () => {
       if (closed) return
       ws = new WebSocket(wsUrl())
+      ws.onopen = () => {
+        // Events sent while the socket was down are gone for good, so a room that
+        // only listened would show a stale transcript and a run that had already
+        // ended as still going. Reload what is on screen after any reconnect.
+        if (opened && roomRef.current) void loadRoom(roomRef.current)
+        opened = true
+        failures = 0
+      }
       // Same race as bootstrap, and it also covers the daemon being restarted
       // underneath a running window.
-      ws.onclose = () => { if (!closed) retry = setTimeout(connect, 1500) }
+      ws.onclose = () => { if (!closed) retry = setTimeout(connect, reconnectDelay(failures++)) }
       ws.onerror = () => ws.close()
       wire(ws)
     }

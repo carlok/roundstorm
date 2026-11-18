@@ -27,6 +27,8 @@ export interface BrainAdapter {
   supportsSystemPrompt: boolean
   /** True when the provider rejects or mangles `additionalProperties: false`. */
   relaxedSchema?: boolean
+  /** True when the adapter writes its own output-format instruction into the prompt. */
+  promptsOwnContract?: boolean
   /** True when the provider enforces OpenAI strict mode (all props required). */
   strictSchema?: boolean
   /** Vendor-account / data-retention note surfaced in the brain picker (plan §19.7). */
