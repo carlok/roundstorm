@@ -176,6 +176,12 @@ export type ConsensusLevel =
   | 'conclave_reached'
   | 'conclave_failed'
 
+/**
+ * A conclave's `rounds` is an emergency maximum with a floor, so a conclave
+ * started at "3 rounds" still has room to negotiate. Pure, so the UI can show it.
+ */
+export const conclaveCap = (rounds: number | null | undefined): number => Math.max(4, rounds ?? 8)
+
 export const LEVEL_LABEL: Record<ConsensusLevel, string> = {
   strong_consensus: 'Strong consensus',
   consensus_with_reservations: 'Consensus with reservations',

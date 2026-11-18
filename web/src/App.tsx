@@ -424,6 +424,7 @@ export function App() {
         {rs.active && (
           <ControlBar
             deliberation={rs.active} roster={roster} activity={rs.activity}
+            ledger={rs.ledger} messages={rs.messages}
             onExtend={by => void rs.extend(by)} onStop={() => void rs.stop()}
             onInterrupt={() => {
               if (!draft.trim()) return flash('Write your steer first, then interrupt')

@@ -100,6 +100,17 @@ export function makeApi() {
     })
   })
 
+  /**
+   * Just the run's ledger summary. The UI refreshes it as turns land, which used
+   * to happen only when a run ended, so nobody could watch a room converge.
+   */
+  api.get('/rooms/:id/ledger', (req, res) => {
+    const room = db.getRoom(req.params.id)
+    if (!room) return res.status(404).json({ error: 'no such room' })
+    const roster = room.memberIds.map(id => db.getAgent(id)).filter((a): a is Agent => !!a)
+    res.json(summarise(room.id, roster, currentRun(room.id)))
+  })
+
   // Memory inbox: agents propose, a human keeps or discards (plan §5.2).
   api.get('/memory', (req, res) => {
     const status = typeof req.query.status === 'string' ? req.query.status : undefined

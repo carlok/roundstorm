@@ -112,6 +112,20 @@ export function useRoundstorm() {
     let retry: ReturnType<typeof setTimeout>
     let failures = 0
     let opened = false
+    let ledgerTimer: ReturnType<typeof setTimeout> | undefined
+
+    // The ledger summary used to reload only when a run ended, so nobody could
+    // watch a room converge. Refresh it as turns land, at most twice a second.
+    const refreshLedger = () => {
+      clearTimeout(ledgerTimer)
+      ledgerTimer = setTimeout(() => {
+        const id = roomRef.current
+        if (!id) return
+        json<LedgerSummary>(`/api/rooms/${id}/ledger`)
+          .then(l => { if (roomRef.current === id) setLedger(l) })
+          .catch(() => { /* the next turn will try again */ })
+      }, 500)
+    }
 
     const connect = () => {
       if (closed) return
@@ -136,6 +150,7 @@ export function useRoundstorm() {
       const e = JSON.parse(ev.data) as ServerEvent
       if (e.type === 'message' || e.type === 'message.updated') {
         if (e.message.roomId !== roomRef.current) return
+        if (e.message.authorType === 'agent') refreshLedger()
         setMessages(prev => {
           const i = prev.findIndex(m => m.id === e.message.id)
           if (i === -1) return [...prev, e.message]
@@ -150,6 +165,9 @@ export function useRoundstorm() {
         if (e.result.roomId !== roomRef.current) return
         setResults(prev => [...prev.filter(r => r.id !== e.result.id), e.result])
       } else if (e.type === 'deliberation') {
+        // A new run starts with the previous run's summary still in hand; refresh
+        // at once so the control bar never shows the last question's tally.
+        if (e.deliberation.roomId === roomRef.current && e.deliberation.status === 'running') refreshLedger()
         setActive(prev => {
           if (e.deliberation.roomId !== roomRef.current) return prev
           const finished = !['running', 'stopping'].includes(e.deliberation.status)
@@ -166,7 +184,7 @@ export function useRoundstorm() {
     }
 
     connect()
-    return () => { closed = true; clearTimeout(retry); ws?.close() }
+    return () => { closed = true; clearTimeout(retry); clearTimeout(ledgerTimer); ws?.close() }
   }, [loadRoom])
 
   const send = useCallback(async (body: string, replyTo: string | null) => {

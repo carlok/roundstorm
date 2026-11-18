@@ -515,3 +515,19 @@ test('a sealed round\'s ledger shows only what predates the run, with no stances
   assert.ok(!/Alice: assert/.test(sealed), 'stances shown in a blind round')
   assert.ok(renderLedger(r.id, [A, B], d.id).includes('FRESH-PEER'), 'unsealed rendering lost it')
 })
+
+test('the summary says who backs the leading position at its current version, by name', async () => {
+  const p = db.createProject('standing')
+  const r = db.createRoom(p.id, 'standing', 'room', [A.id, B.id, C.id])
+  const pos = db.createPosition(r.id, 'Oil whip', 'v1', A.id)
+  db.recordOp({ positionId: pos.id, version: 1, agentId: A.id, op: 'assert', round: 1, deliberationId: null })
+  db.recordOp({ positionId: pos.id, version: 1, agentId: B.id, op: 'endorse', round: 1, deliberationId: null })
+  const s = summarise(r.id, [A, B, C])
+  assert.deepEqual(s.standing, {
+    label: pos.label, version: 1, title: 'Oil whip', n: 3,
+    backers: ['Alice', 'Bruno'], holdouts: ['Curie'],
+  })
+  const v2 = db.revisePosition(pos.id, 'v2')
+  db.recordOp({ positionId: pos.id, version: v2, agentId: C.id, op: 'assert', round: 2, deliberationId: null })
+  assert.deepEqual(summarise(r.id, [A, B, C]).standing?.backers, ['Curie'], 'stale support survived a revision')
+})

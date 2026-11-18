@@ -158,6 +158,11 @@ export interface LedgerSummary {
   leading: Position | null
   level: ConsensusLevel
   headline: string
+  /**
+   * Who stands where on the leading position, at its current version. Names, not
+   * ids, because this is for display: the live line in the control bar.
+   */
+  standing: { label: string; version: number; title: string; backers: string[]; holdouts: string[]; n: number } | null
 }
 
 const SUPPORT = new Set(['assert', 'endorse'])
@@ -180,6 +185,7 @@ export function summarise(roomId: string, roster: Agent[], deliberationId?: stri
       positions, leading: null,
       level: 'no_reliable_conclusion',
       headline: 'No position was put on the record',
+      standing: null,
     }
   }
 
@@ -210,7 +216,14 @@ export function summarise(roomId: string, roster: Agent[], deliberationId?: stri
   else if (supporters < 2) level = 'no_reliable_conclusion'
   else level = 'consensus_with_reservations'
 
-  return { positions, leading, level, headline: LEVEL_LABEL[level] }
+  const backerIds = new Set(leading.stances.filter(s => backs(leading, s)).map(s => s.agentId))
+  const standing = {
+    label: leading.label, version: leading.version, title: leading.title, n: roster.length,
+    backers: roster.filter(a => backerIds.has(a.id)).map(a => a.name),
+    holdouts: roster.filter(a => !backerIds.has(a.id)).map(a => a.name),
+  }
+
+  return { positions, leading, level, headline: LEVEL_LABEL[level], standing }
 }
 
 /**
