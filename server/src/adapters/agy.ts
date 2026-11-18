@@ -11,7 +11,7 @@
  * output, so the turn schema must not carry `additionalProperties: false`.
  */
 import type { AdapterEvent, BrainAdapter, TurnRequest } from './types.ts'
-import { capture, clean, streamProcess, which } from './spawn.ts'
+import { capture, clean, streamProcess, which, type StreamOpts } from './spawn.ts'
 import type { Tier } from '../types.ts'
 
 export const agyAdapter: BrainAdapter = {
@@ -67,11 +67,17 @@ function runAgy(req: TurnRequest, signal: AbortSignal): AsyncIterable<AdapterEve
   args.push(...agyTierArgs(req.tier))
   if (req.tier !== 'reasoning' && req.workingDir) args.push('--add-dir', req.workingDir)
 
-  let response = ''
-  let failed: string | null = null
-
   return streamProcess('agy', args, signal, {
     cwd: req.workingDir ?? undefined,
+    ...agyTranslator(),
+  })
+}
+
+/** agy stream-json lines as AdapterEvents. Exported for recorded-line tests. */
+export function agyTranslator(): Pick<StreamOpts, 'onLine' | 'onClose'> {
+  let response = ''
+  let failed: string | null = null
+  return {
     onLine: (raw, push) => {
       const ev = raw as any
       if (ev.event === 'step_update' && ev.step_update) {
@@ -98,9 +104,11 @@ function runAgy(req: TurnRequest, signal: AbortSignal): AsyncIterable<AdapterEve
         push({ type: 'error', message: failed || stderr.trim().slice(0, 400) || `agy exited ${code}` })
         return
       }
+      // A failure after partial output is still a failure; see codex.ts.
+      if (failed) push({ type: 'error', message: failed })
       let structured: unknown = null
       try { structured = JSON.parse(response) } catch { /* coerceTurn will try harder */ }
       push({ type: 'final', structured, text: response })
     },
-  })
+  }
 }

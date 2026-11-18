@@ -464,3 +464,54 @@ test('the prompt separates this run\'s positions from the room\'s standing ones'
   assert.doesNotMatch(standing, /Alice: assert/,
     "an earlier run's stances were shown as though they applied here")
 })
+
+// --- 0.2.0 ---
+
+test('an oppose with no valid label is dropped, never folded into an endorsement', async () => {
+  const p = db.createProject('ops')
+  const r = db.createRoom(p.id, 'ops', 'room', [A.id, B.id])
+  const run = (agent: typeof A, ops: any[]) =>
+    applyPositionOps({ roomId: r.id, agent, ops, messageId: 'm', round: 1, deliberationId: null })
+  await run(A, [{ label: null, title: 'Oil whip is the cause', op: 'assert', note: '', text: 'It is.' }])
+  for (const bad of ['oppose', 'unsure', 'withdraw']) {
+    await run(B, [{ label: 'P99', title: 'Oil whip is not the cause', op: bad, note: '', text: '' }])
+  }
+  const positions = db.listPositions(r.id)
+  assert.equal(positions.length, 1, 'a dissenting op opened a position of its own')
+  assert.ok(!positions[0].stances.some(s => s.agentId === B.id), 'a dissent was recorded as support')
+  assert.equal(db.listEvents(r.id).filter(e => e.type === 'position.op_dropped').length, 3)
+})
+
+test('support counts only at the current version', async () => {
+  // A revision deletes endorsements but an assert survived, so the original author
+  // still counted as backing text someone else had rewritten.
+  const p = db.createProject('versions')
+  const r = db.createRoom(p.id, 'versions', 'room', [A.id, B.id])
+  const pos = db.createPosition(r.id, 'Oil whip', 'v1 text', A.id)
+  db.recordOp({ positionId: pos.id, version: 1, agentId: A.id, op: 'assert', round: 1, deliberationId: null })
+  const v2 = db.revisePosition(pos.id, 'v2 text')
+  db.recordOp({ positionId: pos.id, version: v2, agentId: B.id, op: 'assert', round: 2, deliberationId: null })
+  const s = summarise(r.id, [A, B])
+  assert.notEqual(s.level, 'strong_consensus', 'A\'s v1 assert was counted for v2')
+})
+
+test('a sealed round\'s ledger shows only what predates the run, with no stances', async () => {
+  const p = db.createProject('sealed')
+  const r = db.createRoom(p.id, 'sealed', 'room', [A.id, B.id])
+  const old = db.createPosition(r.id, 'OLD-STANDING', 'from before', A.id)
+  db.recordOp({ positionId: old.id, version: 1, agentId: A.id, op: 'assert', round: 1, deliberationId: null })
+  await new Promise(res => setTimeout(res, 5))
+  const d = db.createDeliberation({
+    roomId: r.id, mode: 'deliberation', rounds: 2, style: 'pingpong', sealedOpening: true,
+    status: 'running', currentRound: 1, question: 'q', tier: 'reasoning',
+  } as never)
+  await new Promise(res => setTimeout(res, 5))
+  const fresh = db.createPosition(r.id, 'FRESH-PEER', 'committed this round', B.id)
+  db.recordOp({ positionId: fresh.id, version: 1, agentId: B.id, op: 'assert', round: 1, deliberationId: d.id })
+
+  const sealed = renderLedger(r.id, [A, B], d.id, { sealedSince: d.createdAt })
+  assert.ok(sealed.includes('OLD-STANDING'))
+  assert.ok(!sealed.includes('FRESH-PEER'), 'a peer\'s sealed position leaked')
+  assert.ok(!/Alice: assert/.test(sealed), 'stances shown in a blind round')
+  assert.ok(renderLedger(r.id, [A, B], d.id).includes('FRESH-PEER'), 'unsealed rendering lost it')
+})

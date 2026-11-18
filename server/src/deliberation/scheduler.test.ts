@@ -22,8 +22,9 @@ const db = await import('../db.ts')
 const { registerAdapter } = await import('../adapters/registry.ts')
 const { makeStubBrain } = await import('../adapters/stub.ts')
 type StubOptions = Parameters<typeof makeStubBrain>[0]
-const { startDeliberation, stopDeliberation, interruptDeliberation } =
+const { startDeliberation, stopDeliberation, interruptDeliberation, mentions, parseTurnTimeout } =
   await import('./scheduler.ts')
+const { synthesise } = await import('./synthesis.ts')
 
 const project = db.createProject('Scheduler tests')
 let seq = 0
@@ -232,4 +233,167 @@ test('a room asking for file access without a directory is downgraded', async ()
   const call = roundCalls(stubs.get('A')!)[0]
   assert.equal(call.tier, 'research', 'full tier survived with no working directory')
   assert.equal(call.workingDir, null)
+})
+
+// --- 0.2.0 fixes ---
+
+const eventsOf = (deliberationId: string, type: string) =>
+  db.listEvents(null, 5000).filter(e => e.deliberationId === deliberationId && e.type === type)
+
+test('the turn deadline is parsed, not cast', () => {
+  // `Number("6m")` is NaN and setTimeout(NaN) fires at once: every turn timed out.
+  assert.equal(parseTurnTimeout(undefined), 360_000)
+  assert.equal(parseTurnTimeout('6m'), 360_000)
+  assert.equal(parseTurnTimeout(''), 360_000)
+  assert.equal(parseTurnTimeout('500'), 360_000, 'under a second is a typo, not a deadline')
+  assert.equal(parseTurnTimeout('1.5e3'), 1_500)
+  assert.equal(parseTurnTimeout('90000'), 90_000)
+})
+
+test('an @mention matches the name literally, punctuation and all', () => {
+  assert.equal(mentions('@C++ Expert, over to you', 'C++ Expert'), true)
+  assert.equal(mentions('ask @Brunod', 'Bruno'), false)
+  assert.equal(mentions('@bruno?', 'Bruno'), true)
+  assert.equal(mentions('@a.b', 'a+b'), false)
+})
+
+test('an agent named with regex characters does not fail the run when a steer is pending', async () => {
+  // The name went straight into a RegExp: "C++" threw "Nothing to repeat" outside
+  // the turn's try block, and the whole deliberation was marked failed.
+  const { room: r, stubs, cleanup } = room(['C++ Expert'])
+  const name = db.getAgent(r.memberIds[0])!.name
+  db.insertMessage({ roomId: r.id, authorType: 'human', priority: true, body: `@${name} what do you think?` })
+  const d = deliberation(r.id, { rounds: 1 })
+  await startDeliberation(d)
+  cleanup()
+  assert.equal(db.getDeliberation(d.id)!.status, 'complete')
+  assert.match(roundCalls(stubs.get('C++ Expert')!)[0].userPrompt, /addressed you by name/)
+})
+
+test('a steer that arrives in the final round does not lead the next run', async () => {
+  const { room: r, stubs, cleanup } = room(['A'], () => ({ delayMs: 150 }))
+  const first = deliberation(r.id, { rounds: 1 })
+  const run = startDeliberation(first)
+  let steer: ReturnType<typeof db.insertMessage> | undefined
+  setTimeout(() => {
+    steer = db.insertMessage({ roomId: r.id, authorType: 'human', priority: true, body: 'LATE-STEER-MARK' })
+  }, 40)
+  await run
+  assert.equal(db.listMessages(r.id).find(m => m.id === steer!.id)?.priority, false,
+    'a steer nobody was shown is still flagged as pending')
+
+  stubs.get('A')!.reset()
+  await startDeliberation(deliberation(r.id, { rounds: 1 }))
+  cleanup()
+  const prompt = roundCalls(stubs.get('A')!)[0].userPrompt
+  assert.ok(!/# PRIORITY/.test(prompt), 'an old steer was presented as this run\'s priority')
+  assert.ok(prompt.includes('LATE-STEER-MARK'), 'the message itself should still be in the transcript')
+})
+
+test('a second run sees the whole first run, labelled, and no system lines', async () => {
+  // Filtering by round number alone showed run 2's round 1 nothing of run 1 past
+  // its round 0, and run 2's round 3 run 1's rounds 1-2 only.
+  const { room: r, stubs, cleanup } = room(['A', 'B'], n =>
+    n === 'B' ? { fail: 'BOOM-FAIL' } : { reply: (_c, i) => `RUN-MARK-${i}` })
+  await startDeliberation(deliberation(r.id, { rounds: 2 }))
+  stubs.get('A')!.reset()
+  await startDeliberation(deliberation(r.id, { rounds: 1 }))
+  cleanup()
+
+  const prompt = roundCalls(stubs.get('A')!)[0].userPrompt
+  assert.match(prompt, /Earlier in this room/)
+  assert.ok(prompt.includes('RUN-MARK-0') && prompt.includes('RUN-MARK-1'),
+    'the earlier run\'s second round was hidden from this run\'s first')
+  assert.ok(!prompt.includes('BOOM-FAIL'), 'a failure notice reached a prompt')
+  assert.ok(!prompt.includes('__result__'), 'a result-card pointer reached a prompt')
+})
+
+test('a turn cut off by the deadline is not stored as an answer, even with text', async () => {
+  const { room: r, cleanup } = room(['Ok', 'Slow'],
+    n => n === 'Slow' ? { partial: 'Let me search for that first' } : {})
+  const d = deliberation(r.id, { rounds: 1 })
+  await startDeliberation(d)
+  cleanup()
+  const msgs = db.listMessages(r.id).filter(m => m.deliberationId === d.id)
+  assert.ok(!msgs.some(m => m.body.includes('Let me search')), 'a partial reply was stored as the turn')
+  assert.ok(msgs.some(m => m.authorType === 'system' && /did not answer/.test(m.body)))
+  const ev = eventsOf(d.id, 'turn.timeout')[0]
+  assert.ok(ev && (ev.payload as any).discardedChars > 0, 'what was discarded is not on record')
+})
+
+const rapporteur = (c: { systemPrompt: string }) => /neutral rapporteur/i.test(c.systemPrompt)
+const synthOrTurn = (c: { systemPrompt: string }) => rapporteur(c)
+  ? { conclusion: 'SYNTH-OK: the stub synthesiser actually ran to the end', why: 'SYNTH-WHY',
+      commonGround: [], disagreement: [], alternatives: [], evidence: [], unknowns: [], nextSteps: [] }
+  : { body: 'a turn', stance: 'propose', reply_to: '', claims: [{ text: 'c', basis: 'reasoned' }] }
+
+test('synthesis after an interrupt runs under a live signal', async () => {
+  // It was handed the run's first controller, which the interrupt had aborted.
+  const { room: r, cleanup } = room(['A'], () => ({ delayMs: 120, turn: synthOrTurn }))
+  const d = deliberation(r.id, { rounds: 1 })
+  const run = startDeliberation(d)
+  setTimeout(() => interruptDeliberation(d.id), 50)
+  await run
+  cleanup()
+  const card = db.listResults(r.id).find(c => c.deliberationId === d.id)
+  assert.equal(card?.why, 'SYNTH-WHY', 'the card is the bare fallback: synthesis was cancelled')
+})
+
+test('a conclave shows a pending steer, then consumes it', async () => {
+  const { room: r, stubs, cleanup } = room(['A', 'B'])
+  const steer = db.insertMessage({ roomId: r.id, authorType: 'human', priority: true, body: 'CONCLAVE-STEER' })
+  const d = deliberation(r.id, { mode: 'conclave', rounds: 4 })
+  await startDeliberation(d)
+  cleanup()
+  const calls = [...stubs.values()].flatMap(roundCalls)
+  assert.ok(calls.some(c => /# PRIORITY[\s\S]*CONCLAVE-STEER/.test(c.userPrompt)),
+    'the steer never reached a conclave turn')
+  assert.equal(calls.filter(c => /# PRIORITY/.test(c.userPrompt)).length, 2,
+    'the steer should lead exactly the first round (two agents), then be consumed')
+  assert.equal(db.listMessages(r.id).find(m => m.id === steer.id)?.priority, false)
+})
+
+test('interrupting a conclave repeats the round instead of ending it', async () => {
+  const { room: r, cleanup } = room(['A', 'B'], () => ({ delayMs: 80 }))
+  const d = deliberation(r.id, { mode: 'conclave', rounds: 4 })
+  const run = startDeliberation(d)
+  setTimeout(() => interruptDeliberation(d.id), 40)
+  await run
+  cleanup()
+  assert.equal(eventsOf(d.id, 'round.restarted').length, 1, 'the interrupt did not restart the round')
+  assert.equal(db.getDeliberation(d.id)!.currentRound, 4, 'the conclave stopped early after an interrupt')
+})
+
+test('the conclave card takes the conclave\'s own verdict', async () => {
+  // Re-deriving it from the general summary could say "reached" for a conclave
+  // that had run to its cap.
+  const { room: r, agents, cleanup } = room(['A', 'B'], () => ({ turn: synthOrTurn }))
+  const d = deliberation(r.id, { mode: 'conclave', rounds: 4, status: 'complete' })
+  db.insertMessage({ roomId: r.id, authorType: 'agent', authorId: agents[0].id, body: 'x', round: 1, deliberationId: d.id })
+  const p = db.createPosition(r.id, 'Oil whip', 'It is oil whip.', agents[0].id)
+  db.recordOp({ positionId: p.id, version: p.version, agentId: agents[0].id, op: 'assert', round: 1, deliberationId: d.id })
+  db.recordOp({ positionId: p.id, version: p.version, agentId: agents[1].id, op: 'endorse', round: 1, deliberationId: d.id })
+
+  const failed = await synthesise(d.id, new AbortController().signal, { conclave: { reached: false } })
+  assert.equal(failed?.level, 'conclave_failed')
+  const reached = await synthesise(d.id, new AbortController().signal, { conclave: { reached: true } })
+  assert.equal(reached?.level, 'conclave_reached')
+  cleanup()
+})
+
+test('a sealed ping-pong round does not leak the first speaker\'s position through the ledger', async () => {
+  const { room: r, stubs, cleanup } = room(['A', 'B'], n => ({
+    turn: (c: { systemPrompt: string }) => rapporteur(c) ? synthOrTurn(c) : {
+      body: `turn by ${n}`, stance: 'propose', reply_to: '',
+      claims: [{ text: 'c', basis: 'reasoned' }],
+      position_ops: [{ op: 'assert', label: '', title: `SECRET-TITLE-${n}`, text: `secret ${n}`, note: '' }],
+    },
+  }))
+  await startDeliberation(deliberation(r.id, { rounds: 1, style: 'pingpong', sealedOpening: true }))
+  cleanup()
+  for (const [n, stub] of stubs) {
+    const other = n === 'A' ? 'B' : 'A'
+    assert.ok(!roundCalls(stub)[0].userPrompt.includes(`SECRET-TITLE-${other}`),
+      `${n} saw ${other}'s sealed position`)
+  }
 })

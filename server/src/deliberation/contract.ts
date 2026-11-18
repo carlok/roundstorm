@@ -92,23 +92,39 @@ export const TURN_SCHEMA = {
   additionalProperties: false,
 } as const
 
-/** Instruction appended for brains that cannot enforce a schema. */
+/**
+ * Instruction appended for brains that cannot enforce a schema.
+ *
+ * It has to name everything the turn instruction asks for. It used to stop at
+ * body/stance/claims, so a prompted brain (cursor-agent) was told to record
+ * position_ops and never shown where they go: those agents almost never reached
+ * the ledger, a room with one could not reach strong consensus, and a conclave
+ * named them as holdouts after they had written "I endorse". The body is not
+ * repeated in the block any more; the prose before it is the message, which
+ * roughly halved what these brains had to write.
+ */
 export const PROMPT_CONTRACT = `
 ## Output format
 
-Reply with your message, then a fenced JSON block describing its structure:
+Write your message in Markdown. Then end with one fenced JSON block describing it:
 
 \`\`\`json
 {
-  "body": "<your message in Markdown — repeat it here in full>",
   "stance": "propose | support | object | refine | question | concede | endorse",
   "reply_to": "<message id you are replying to, or \\"\\">",
   "claims": [
     { "text": "<a load-bearing assertion>", "basis": "reasoned | computed | sourced | recalled", "confidence": "low | medium | high" }
+  ],
+  "position_ops": [
+    { "op": "assert | revise | endorse | oppose | unsure | withdraw", "label": "<existing label like P2, or \\"\\" for a new position>", "title": "<short title, for a new position>", "text": "<the position, for assert or revise>", "note": "<why>" }
+  ],
+  "memory": [
+    { "type": "result | decision | definition | assumption | open-question", "text": "<one thing worth remembering, only in the final round>" }
   ]
 }
 \`\`\`
 
+Do not repeat your message inside the block. Leave "memory" empty unless this is the final round.
 Mark a claim "sourced" only if you actually retrieved the source in this session.
 `.trim()
 

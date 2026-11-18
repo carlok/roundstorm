@@ -457,6 +457,12 @@ export function makeApi() {
   api.delete('/agents/:id', (req, res) => {
     const agent = db.getAgent(req.params.id)
     if (!agent) return res.status(404).json({ error: 'no such agent' })
+    // Mid-run, the agent's closing-round memory proposal hits the foreign key and
+    // fails the whole deliberation, and synthesis labels its turns "Human".
+    const busy = db.listRooms().find(r => r.memberIds.includes(agent.id) && db.activeDeliberation(r.id))
+    if (busy) {
+      return res.status(409).json({ error: `${agent.name} is in a running deliberation in "${busy.name}"; stop it first` })
+    }
     const info = db.deleteAgent(req.params.id)
     db.logEvent('agent.deleted', { agentId: req.params.id, payload: { name: agent.name, ...info } })
     res.json({ ok: true, ...info })

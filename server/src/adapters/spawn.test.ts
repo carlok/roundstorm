@@ -110,3 +110,16 @@ for (const how of ['abort', 'terminateAll'] as const) {
     await run
   })
 }
+
+test('a signal aborted before the spawn starts nothing', async () => {
+  // An abort listener never fires for a signal that is already aborted, so Stop
+  // followed by synthesis launched a full CLI run nobody could cancel.
+  const ac = new AbortController()
+  ac.abort()
+  const events: AdapterEvent[] = []
+  for await (const e of streamProcess('sh', ['-c', 'sleep 5'], ac.signal, {
+    onLine: () => {}, onClose: (_c, _e, push) => push({ type: 'activity', text: 'closed' }),
+  })) events.push(e)
+  assert.equal(liveChildCount(), 0, 'a child was started for a cancelled turn')
+  assert.deepEqual(events.map(e => e.type), ['error'])
+})

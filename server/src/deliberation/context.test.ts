@@ -247,3 +247,14 @@ test('a digest line is cut short, and the lines share a bounded allowance', () =
 test('under the budget there is no digest at all', () => {
   assert.ok(!compose(long(), 100_000).userPrompt.includes('one line each'))
 })
+
+test('under pressure the pin stays on THIS run\'s newest round, not an older run\'s', async () => {
+  const { renderHistoryWithin } = await import('./context.ts')
+  const old = [1, 2, 3, 4, 5].map(r => ({ ...msg(`o${r}`, 'a-Bruno', `OLD-R${r} ` + 'x'.repeat(900), r), deliberationId: 'old' }))
+  const now = [{ ...msg('n1', 'a-Bruno', 'CURRENT-R1 ' + 'y'.repeat(900), 1), deliberationId: 'd1' }]
+  const out = renderHistoryWithin([...old, ...now], roster, 1_500, { currentDeliberationId: 'd1' })
+  assert.ok(out.text.includes('CURRENT-R1'), 'the round being answered was trimmed away')
+  assert.ok(!out.text.includes('OLD-R5 ' + 'x'.repeat(300)), 'an older run\'s last round was kept in full (pinned) instead')
+  assert.match(out.text, /Earlier in this room/)
+  assert.match(out.text, /## This deliberation/)
+})

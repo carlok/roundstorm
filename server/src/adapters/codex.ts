@@ -15,7 +15,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync,
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { AdapterEvent, BrainAdapter, TurnRequest } from './types.ts'
-import { streamProcess, which } from './spawn.ts'
+import { streamProcess, which, type StreamOpts } from './spawn.ts'
 import { DATA_PATH, logEvent } from '../db.ts'
 import type { Tier } from '../types.ts'
 import { isTier } from '../types.ts'
@@ -109,12 +109,18 @@ function runCodex(req: TurnRequest, signal: AbortSignal): AsyncIterable<AdapterE
   if (req.model) args.push('--model', req.model)
   if (req.workingDir) args.push('--cd', req.workingDir)
 
-  let finalText = ''
-  let failure: string | null = null
-
   return streamProcess('codex', args, signal, {
     cwd: req.workingDir ?? undefined,
     env: { CODEX_HOME: isolatedHome() },
+    ...codexTranslator(),
+  })
+}
+
+/** codex exec --json lines as AdapterEvents. Exported for recorded-line tests. */
+export function codexTranslator(): Pick<StreamOpts, 'onLine' | 'onClose'> {
+  let finalText = ''
+  let failure: string | null = null
+  return {
     onLine: (raw, push) => {
       const ev = raw as any
       if (ev.type === 'turn.started') push({ type: 'activity', text: 'Thinking' })
@@ -146,13 +152,17 @@ function runCodex(req: TurnRequest, signal: AbortSignal): AsyncIterable<AdapterE
         // fallback below was unreachable and the agent failed with a blank reason.
         push({ type: 'error', message: failure || tail.slice(0, 400) || `codex exited ${code}` })
       } else {
+        // A turn that wrote a preamble and then failed (a usage limit, a crash)
+        // was stored as a clean turn: the failure was only reported when there
+        // was no text at all. Report it, and the scheduler marks the turn degraded.
+        if (failure) push({ type: 'error', message: failure })
         // The schema-constrained answer arrives as the agent_message text.
         let structured: unknown = null
         try { structured = JSON.parse(finalText) } catch { /* let coerceTurn extract it */ }
         push({ type: 'final', structured, text: finalText })
       }
     },
-  })
+  }
 }
 
 /** Unwrap codex's nested {"error":{"message":"{json}"}} envelopes into one line. */
