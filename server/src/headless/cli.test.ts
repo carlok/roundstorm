@@ -114,3 +114,45 @@ test('Ctrl-C ends a run in flight: exit 130, nothing left running, no brain proc
     if (cli.exitCode === null) cli.kill('SIGKILL')
   }
 })
+
+// --- listing, overrides and the full transcript (#89) ---
+
+test('--list-brains and --list-personas print what a config may name, and need no file', () => {
+  const brains = run('--list-brains')
+  assert.equal(brains.status, 0)
+  assert.ok(brains.stdout.split('\n').includes('claude'))
+  const personas = run('--list-personas')
+  assert.equal(personas.status, 0)
+  assert.match(personas.stdout, /^skeptic\s+/m)
+})
+
+test('--rounds overrides the config, and refuses nonsense', () => {
+  const r = run('--dry-run', '--rounds', '1', 'examples/conclave.jsonc')
+  assert.equal(r.status, 0)
+  assert.match(r.stdout, /, 1 rounds,/)
+  for (const bad of ['0', '21', '2.5', 'lots']) {
+    const b = run('--rounds', bad, 'examples/conclave.jsonc')
+    assert.equal(b.status, 1, `--rounds ${bad} was accepted`)
+    assert.match(b.stderr, /--rounds must be/)
+  }
+})
+
+test('--transcript adds the whole discussion to the result', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rs-transcript-'))
+  const cfg = join(dir, 'exp.jsonc')
+  writeFileSync(cfg, JSON.stringify({
+    room: { name: 'Transcript room', tier: 'reasoning' },
+    agents: [{ name: 'Alice', persona: 'skeptic', brain: 'claude' }],
+    question: 'Will the whole discussion come out?', rounds: 3,
+  }))
+  const r = spawnSync(process.execPath, [
+    '--experimental-strip-types', '--disable-warning=ExperimentalWarning',
+    '--import', './server/src/headless/answer-brain.fixture.ts',
+    'server/src/headless/cli.ts', cfg, '--rounds', '2', '--transcript', '--quiet',
+  ], { encoding: 'utf8', env: { ...process.env, ROUNDSTORM_DATA: dir } })
+  // 2 is "no reliable conclusion": the stub records no positions. 3 would be a broken run.
+  assert.ok(r.status === 0 || r.status === 2, `exit ${r.status}: ${r.stderr}`)
+  assert.ok(r.stdout.includes('FIXTURE-TURN-1') && r.stdout.includes('FIXTURE-TURN-2'), 'the turns are missing')
+  assert.ok(!r.stdout.includes('FIXTURE-TURN-3'), '--rounds 2 did not override rounds: 3')
+  assert.match(r.stdout, /Will the whole discussion come out\?/)
+})

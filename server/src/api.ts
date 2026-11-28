@@ -12,7 +12,7 @@ import { MODE_BLURB, MODE_LABEL } from './deliberation/context.ts'
 import { adapterIds, listBrainOptions, probeBrains } from './adapters/registry.ts'
 import { extendDeliberation, interruptDeliberation, startDeliberation, stopDeliberation } from './deliberation/scheduler.ts'
 import { summarise } from './deliberation/ledger.ts'
-import { renderResultMarkdown } from './deliberation/export.ts'
+import { exportPayload, renderResultMarkdown } from './deliberation/export.ts'
 import { embedderStatus, indexPending, semanticSearch } from './search/embeddings.ts'
 import { compare, createExperiment, reportArm } from './deliberation/personalab.ts'
 import { ConfigError, parseExperiment } from './headless/config.ts'
@@ -73,6 +73,9 @@ export function makeApi() {
     res.json({
       projects: db.listProjects(),
       rooms: db.listRooms(),
+      // Rooms with a deliberation in progress, so the sidebar can mark them from
+      // the start; after that the event stream keeps it current.
+      running: db.listRooms().filter(r => db.activeDeliberation(r.id)).map(r => r.id),
       agents: db.listAgents(),
       personas: ALL_PERSONAS,
       brains: await probeBrains(),
@@ -193,15 +196,7 @@ export function makeApi() {
     const room = db.getRoom(req.params.id)
     if (!room) return res.status(404).json({ error: 'no such room' })
     const format = req.query.format === 'json' ? 'json' : 'markdown'
-    const payload = {
-      room,
-      agents: room.memberIds.map(id => db.getAgent(id)).filter(Boolean),
-      messages: db.listMessages(room.id),
-      positions: db.listPositions(room.id),
-      sources: db.listSources(room.id),
-      results: db.listResults(room.id),
-      deliberations: db.listDeliberations(room.id),
-    }
+    const payload = exportPayload(room.id)!
     if (format === 'json') {
       res.setHeader('content-type', 'application/json')
       return res.send(JSON.stringify(payload, null, 2))

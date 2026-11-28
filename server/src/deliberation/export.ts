@@ -5,6 +5,7 @@
  */
 import { isResultBody, type Agent, type Deliberation, type Message, type Position, type ResultCard, type Room, type Source } from '../types.ts'
 import { LEVEL_LABEL } from './ledger.ts'
+import * as db from '../db.ts'
 
 export interface ExportPayload {
   room: Room
@@ -14,6 +15,21 @@ export interface ExportPayload {
   sources: Source[]
   results: ResultCard[]
   deliberations: Deliberation[]
+}
+
+/** Everything a room export carries. Shared by the HTTP export and the CLI's --transcript. */
+export function exportPayload(roomId: string): ExportPayload | null {
+  const room = db.getRoom(roomId)
+  if (!room) return null
+  return {
+    room,
+    agents: room.memberIds.map(id => db.getAgent(id)).filter((a): a is Agent => !!a),
+    messages: db.listMessages(room.id),
+    positions: db.listPositions(room.id),
+    sources: db.listSources(room.id),
+    results: db.listResults(room.id),
+    deliberations: db.listDeliberations(room.id),
+  }
 }
 
 export function renderResultMarkdown(p: ExportPayload): string {

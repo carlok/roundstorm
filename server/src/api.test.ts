@@ -344,3 +344,14 @@ test('a room lists its members in the order they joined, not by id', () => {
   assert.deepEqual(db.getRoom(r.id)!.memberIds, ids)
   assert.deepEqual(db.listRooms().find(x => x.id === r.id)!.memberIds, ids)
 })
+
+test('bootstrap lists the rooms with a run in progress', async () => {
+  const r = room('running-room')
+  db.createDeliberation({
+    roomId: r.id, mode: 'deliberation', rounds: 2, style: 'parallel', sealedOpening: false,
+    status: 'running', currentRound: 1, question: 'q', tier: 'reasoning',
+  } as never)
+  const boot = await (await fetch(`${origin}/api/bootstrap`)).json()
+  assert.ok(boot.running.includes(r.id))
+  assert.ok(!boot.running.includes(room('idle-room').id))
+})

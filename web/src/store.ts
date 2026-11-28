@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiUrl, wsUrl } from './lib/api.ts'
 import { reconnectDelay } from './lib/reconnect.ts'
+import { backgroundNotice } from './lib/rooms.ts'
 import type {
   Agent, AgentActivity, BrainInfo, Deliberation, LedgerSummary, Message, ModeInfo,
   Persona, Position, Project, ResultCard, Room, ServerEvent, Source,
@@ -23,6 +24,8 @@ async function json<T>(url: string, init?: RequestInit): Promise<T> {
 export interface Bootstrap {
   projects: Project[]
   rooms: Room[]
+  /** Rooms with a deliberation in progress when the page loaded. */
+  running?: string[]
   agents: Agent[]
   personas: Persona[]
   brains: BrainInfo[]
@@ -41,6 +44,12 @@ export function useRoundstorm() {
   const [ledger, setLedger] = useState<LedgerSummary | null>(null)
   const [error, setError] = useState<string | null>(null)
   const roomRef = useRef<string | null>(null)
+  const bootRef = useRef<Bootstrap | null>(null)
+  // Rooms with a run in progress, kept current from the event stream for every
+  // room, not only the open one, so the sidebar can show them.
+  const [running, setRunning] = useState<Set<string>>(new Set())
+  // A run elsewhere finished: something for the page to tell the user.
+  const [notice, setNotice] = useState<{ id: number; roomId: string; text: string } | null>(null)
   roomRef.current = roomId
 
   const [starting, setStarting] = useState(true)
@@ -48,6 +57,8 @@ export function useRoundstorm() {
   const refreshBoot = useCallback(async () => {
     const b = await json<Bootstrap>('/api/bootstrap')
     setBoot(b)
+    bootRef.current = b
+    setRunning(new Set(b.running ?? []))
     setRoomId(cur => cur ?? b.rooms.find(r => r.kind === 'room')?.id ?? b.rooms[0]?.id ?? null)
   }, [])
 
@@ -162,9 +173,27 @@ export function useRoundstorm() {
         if (e.roomId !== roomRef.current) return
         setActivity(prev => ({ ...prev, [e.activity.agentId]: e.activity }))
       } else if (e.type === 'result') {
-        if (e.result.roomId !== roomRef.current) return
+        if (e.result.roomId !== roomRef.current) {
+          const text = backgroundNotice(bootRef.current?.rooms ?? [], e.result.roomId, { level: e.result.level })
+          if (text) setNotice({ id: Date.now(), roomId: e.result.roomId, text })
+          return
+        }
         setResults(prev => [...prev.filter(r => r.id !== e.result.id), e.result])
       } else if (e.type === 'deliberation') {
+        const live = ['running', 'stopping'].includes(e.deliberation.status)
+        setRunning(prev => {
+          if (prev.has(e.deliberation.roomId) === live) return prev
+          const next = new Set(prev)
+          if (live) next.add(e.deliberation.roomId)
+          else next.delete(e.deliberation.roomId)
+          return next
+        })
+        // A run that finished normally announces itself through its result card;
+        // one that was stopped or failed has none, so say so here.
+        if (!live && e.deliberation.roomId !== roomRef.current && e.deliberation.status !== 'complete') {
+          const text = backgroundNotice(bootRef.current?.rooms ?? [], e.deliberation.roomId, { status: e.deliberation.status })
+          if (text) setNotice({ id: Date.now(), roomId: e.deliberation.roomId, text })
+        }
         // A new run starts with the previous run's summary still in hand; refresh
         // at once so the control bar never shows the last question's tally.
         if (e.deliberation.roomId === roomRef.current && e.deliberation.status === 'running') refreshLedger()
@@ -253,7 +282,7 @@ export function useRoundstorm() {
 
   return {
     boot, room, roomId, setRoomId, messages, active, activity, error, setError, starting,
-    positions, sources, results, ledger,
+    positions, sources, results, ledger, running, notice,
     send, startDeliberation, stop, extend, interrupt, fork, reload,
     setRoomTier, updateAgent, agentById, refreshBoot,
   }
