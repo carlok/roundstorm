@@ -332,3 +332,15 @@ test('a memory card can be edited and forgotten, and a forgotten card leaves the
   assert.equal((await patch(`/api/memory/${card.id}`, { status: 'rejected' })).status, 200)
   assert.ok(!compose().includes('The corrected wording'), 'a forgotten card still reached the prompt')
 })
+
+test('a room lists its members in the order they joined, not by id', () => {
+  // Roster order decides ping-pong rotation, the conclave chair and the synthesiser.
+  const p = db.createProject('order')
+  const mk = (n: string) => db.createAgent({ name: n, role: '', avatarColor: '#000', personaKey: 'skeptic',
+    personaExtra: '', brain: 'x', model: null, tierCeiling: 'reasoning' } as never)
+  const agents = ['Zed', 'Amy', 'Mia', 'Bob', 'Kai', 'Lee'].map(mk)
+  const ids = agents.map(a => a.id).reverse()
+  const r = db.createRoom(p.id, 'ordered', 'room', ids)
+  assert.deepEqual(db.getRoom(r.id)!.memberIds, ids)
+  assert.deepEqual(db.listRooms().find(x => x.id === r.id)!.memberIds, ids)
+})

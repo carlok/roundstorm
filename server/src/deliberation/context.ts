@@ -68,6 +68,9 @@ Look for genuine shared ground and name it precisely. Where you still differ, st
       return `${common}
 Convert uncertainty into concrete work: hypotheses, mathematical subproblems, experiments, simulations, literature to check, falsification tests.
 Prioritise by what would discriminate fastest between the live possibilities.`
+    // Not reached by a real conclave, which always passes its own chair, devil or
+    // endorse instruction. Kept because the switch must cover every mode, and it
+    // is the sensible fallback if a caller ever omits the role.
     case 'conclave':
       return `${common}
 You are in conclave: the room cannot finish until every participant endorses one position.
@@ -124,7 +127,9 @@ export function composeContext(args: {
     `## How to behave here`,
     `- You are talking to colleagues, not writing a report. Be direct and concrete.`,
     `- Disagree when you disagree. Agreeing to be agreeable is the failure mode of this format.`,
-    `- Say plainly whether something is reasoned, computed, retrieved, or recalled. Never present a guess as evidence.`,
+    // The one place this rule is stated. It used to be repeated in the sources
+    // section and in the prompted contract as well, paid for on every turn.
+    `- Say plainly whether something is reasoned, computed, retrieved, or recalled. Never present a guess as evidence. Mark a claim "sourced" only if you retrieved the source in this session, and cite its label.`,
     `- Length: a few tight paragraphs. Nobody reads a wall of text five times per round.`,
     `- Do not restate the question back at the room. Do not summarise the discussion unless asked.`,
   ]
@@ -185,7 +190,10 @@ export function composeContext(args: {
     // position, which fragments the ledger and makes the computed consensus
     // level read as disagreement where there is none. It has to be said
     // bluntly, and only makes sense once a shared ledger actually exists.
-    round === 1 && deliberation.sealedOpening
+    // A conclave role instruction already says which op to use on which
+    // position; the generic paragraph after it only contradicted it.
+    args.extraInstruction ? ''
+    : round === 1 && deliberation.sealedOpening
       ? `Record your position in "position_ops": give it a title and use op "assert".`
       : `Record where you stand in "position_ops".
 **Before opening a new position, read the ledger above.** If an existing position already says what you mean, endorse it (op "endorse") or sharpen it (op "revise") — do NOT open a near-duplicate under a new title. Two entries for one idea make the record unreadable and misreport the room as more divided than it is.
@@ -219,7 +227,7 @@ function renderSources(roomId: string): string {
   const sources = listSources(roomId)
   if (!sources.length) return ''
   return ['# Sources gathered in this room',
-    'Cite these by label in your claims. Do not mark a claim "sourced" without one.', '',
+    'Cite these by label in your claims.', '',
     ...sources.map(s => `- **${s.label}** ${s.title}${s.url ? ` — ${s.url}` : ''}`)].join('\n')
 }
 

@@ -134,8 +134,16 @@ export async function startDeliberation(deliberation: Deliberation) {
     // fallback card. Bounded by the turn deadline too, so a synthesiser that hangs
     // cannot leave the deliberation `running` for ever.
     const current = running.get(deliberation.id)?.controller.signal ?? controller.signal
-    await synthesise(deliberation.id,
-      AbortSignal.any([current, AbortSignal.timeout(TURN_TIMEOUT_MS)]), { conclave })
+    // A plain timer rather than AbortSignal.timeout, whose timer does not keep
+    // the process alive: with nothing else pending, the process could exit while
+    // synthesis was still waiting on it.
+    const deadline = new AbortController()
+    const timer = setTimeout(() => deadline.abort(), TURN_TIMEOUT_MS)
+    try {
+      await synthesise(deliberation.id, AbortSignal.any([current, deadline.signal]), { conclave })
+    } finally {
+      clearTimeout(timer)
+    }
   } catch (err) {
     db.logEvent('deliberation.failed', {
       roomId: deliberation.roomId, deliberationId: deliberation.id,

@@ -298,7 +298,7 @@ export function updateAgent(id: string, patch: Partial<Agent>): Agent | undefine
 
 export function listRooms(): Room[] {
   const rooms = db.prepare('SELECT * FROM rooms ORDER BY created_at').all() as any[]
-  const members = db.prepare('SELECT * FROM room_members').all() as any[]
+  const members = db.prepare('SELECT * FROM room_members ORDER BY rowid').all() as any[]
   return rooms.map(r => ({
     id: r.id, projectId: r.project_id, name: r.name, kind: r.kind, tier: r.tier,
     createdAt: r.created_at,
@@ -306,7 +306,19 @@ export function listRooms(): Room[] {
   }))
 }
 
-export const getRoom = (id: string): Room | undefined => listRooms().find(r => r.id === id)
+/** One room. It used to load every room and every membership row to return this. */
+export function getRoom(id: string): Room | undefined {
+  const r = db.prepare('SELECT * FROM rooms WHERE id=?').get(id) as any
+  if (!r) return undefined
+  // In the order they joined: roster order decides ping-pong rotation, the
+  // conclave chair and which brain synthesises. Without ORDER BY the primary-key
+  // index returns them sorted by (random) agent id.
+  const members = db.prepare('SELECT agent_id FROM room_members WHERE room_id=? ORDER BY rowid').all(id) as any[]
+  return {
+    id: r.id, projectId: r.project_id, name: r.name, kind: r.kind, tier: r.tier,
+    createdAt: r.created_at, memberIds: members.map(m => m.agent_id),
+  }
+}
 
 let txDepth = 0
 
@@ -673,17 +685,26 @@ const toPosition = (r: any, stances: PositionStanceRow[]): Position => ({
 export function listPositions(roomId: string, opts: { deliberationId?: string } = {}): Position[] {
   const rows = db.prepare('SELECT * FROM positions WHERE room_id=? ORDER BY created_at').all(roomId) as any[]
   const scoped = opts.deliberationId !== undefined
+  // Only the columns a stance needs: converting rows to objects is most of what
+  // this call costs.
+  const cols = 'o.id, o.position_id, o.agent_id, o.op, o.note, o.version, o.round'
   const ops = (scoped
-    ? db.prepare(`SELECT * FROM position_ops WHERE position_id IN
-        (SELECT id FROM positions WHERE room_id=?) AND deliberation_id=? ORDER BY id`)
-        .all(roomId, opts.deliberationId)
-    : db.prepare(`SELECT * FROM position_ops WHERE position_id IN
-        (SELECT id FROM positions WHERE room_id=?) ORDER BY id`)
-        .all(roomId)) as any[]
+    ? db.prepare(`SELECT ${cols} FROM position_ops o JOIN positions p ON p.id = o.position_id
+        WHERE p.room_id=? AND o.deliberation_id=? ORDER BY o.id`).all(roomId, opts.deliberationId)
+    : db.prepare(`SELECT ${cols} FROM position_ops o JOIN positions p ON p.id = o.position_id
+        WHERE p.room_id=? ORDER BY o.id`).all(roomId)) as any[]
+  // Grouped once, rather than every op filtered for every position (P × ops per
+  // call, several calls per turn).
+  const byPosition = new Map<string, any[]>()
+  for (const o of ops) {
+    const list = byPosition.get(o.position_id)
+    if (list) list.push(o)
+    else byPosition.set(o.position_id, [o])
+  }
   const out = rows.map(r => {
     // Latest op per agent wins: a ledger is a current state, not a pile of history.
     const latest = new Map<string, any>()
-    for (const o of ops) if (o.position_id === r.id && o.agent_id) latest.set(o.agent_id, o)
+    for (const o of byPosition.get(r.id) ?? []) if (o.agent_id) latest.set(o.agent_id, o)
     return toPosition(r, [...latest.values()].map(o => ({
       agentId: o.agent_id, op: o.op, note: o.note, version: o.version, round: o.round,
     })))
