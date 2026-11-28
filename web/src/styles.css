@@ -819,3 +819,4 @@ button.backup-link:disabled { opacity: .6; cursor: default; }
   font-size: 12px; padding: 3px 10px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg);
 }
 .gsearch-scope button.sel { background: var(--bg-alt); color: var(--fg); font-weight: 600; }
+.hitrow.sel { background: var(--bg-alt); outline: 1px solid var(--line); }

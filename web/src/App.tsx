@@ -148,6 +148,7 @@ export function App() {
       if (meta && e.shiftKey && e.key.toLowerCase() === 'f') { e.preventDefault(); setGlobalSearch(true) }
       else if (meta && e.key === 'f') { e.preventDefault(); setSearch(true) }
       else if (meta && e.key === 'k') { e.preventDefault(); setPalette(p => !p) }
+      else if (meta && e.key === '\\') { e.preventDefault(); setShowInspector(v => !v) }
       else if (e.key === '?' && e.shiftKey && !isTyping(e.target)) { e.preventDefault(); setManual(true) }
       else if (e.key === 'Escape') { setSearch(false); setMenu(null); setGlobalSearch(false) }
     }
@@ -160,6 +161,20 @@ export function App() {
    * reads as "edit the participants" and hid rename and delete completely.
    * Rooms now carry their own menu, on right-click and on a visible ⋯.
    */
+  const saveRoom = useCallback(async (roomId: string, format: 'markdown' | 'json') => {
+    const r = await call(`/api/rooms/${roomId}/export`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ format }),
+    }, 'Export failed')
+    if (r) flash(`Saved to ${(await r.json().catch(() => ({}))).path}`, 4000)
+  }, [call, flash])
+
+  // Send what is in the composer as a steer and restart the round with it.
+  // Shared by the button, ⌘⏎ and the palette.
+  const interruptWith = useCallback(() => {
+    if (!draft.trim()) return flash('Write your steer first, then interrupt')
+    void rs.send(draft.trim(), null).then(() => { setDraft(''); void rs.interrupt() })
+  }, [draft, rs, flash])
+
   const openRoomMenu = useCallback((room: Room, x: number, y: number) => {
     const rename = () => setAsk({
       title: `Rename “${room.name}”`,
@@ -196,12 +211,7 @@ export function App() {
       // desktop app's own window away from the UI.
       ...(['markdown', 'json'] as const).map(format => ({
         label: `Save ${room.kind === 'dm' ? 'chat' : 'room'} as ${format === 'json' ? 'JSON' : 'Markdown'}`,
-        onSelect: async () => {
-          const r = await call(`/api/rooms/${room.id}/export`, {
-            method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ format }),
-          }, 'Export failed')
-          if (r) flash(`Saved to ${(await r.json().catch(() => ({}))).path}`, 4000)
-        },
+        onSelect: () => void saveRoom(room.id, format),
       })),
       { label: 'Clear room — messages and memory…', danger: true, onSelect: () => setAsk({
         title: `Clear “${room.name}”?`,
@@ -221,7 +231,7 @@ export function App() {
       }) },
       { label: 'Delete room…', danger: true, onSelect: del },
     ] })
-  }, [rs, flash, call])
+  }, [rs, flash, call, saveRoom])
 
   const openMenu = useCallback((m: Message, x: number, y: number) => {
     const agent = rs.agentById(m.authorId)
@@ -282,6 +292,11 @@ export function App() {
       { id: 'load-exp', label: 'Load an experiment file…', hint: 'jsonc', run: () => setLoadExp(true) },
       { id: 'new-agent', label: 'New researcher…', hint: 'action', run: () => setAgentSheet({ agent: null }) },
       { id: 'cast', label: 'Edit this room\u2019s cast…', hint: 'action', run: () => setRoomSheet({ room: rs.room }) },
+      { id: 'inspector', label: showInspector ? 'Hide the inspector' : 'Show the inspector', hint: '⌘\\', run: () => setShowInspector(v => !v) },
+      ...(rs.room ? (['markdown', 'json'] as const).map(format => ({
+        id: `save-${format}`, label: `Save this room as ${format === 'json' ? 'JSON' : 'Markdown'}`, hint: 'action',
+        run: () => void saveRoom(rs.room!.id, format),
+      })) : []),
       { id: 'copy-transcript', label: 'Copy transcript as Markdown', hint: 'action',
         run: () => {
           void copyText(transcriptToMarkdown(rs.messages, rs.agentById))
@@ -296,8 +311,15 @@ export function App() {
         { id: 'x1', label: 'Add 1 round', hint: 'action', run: () => void rs.extend(1) },
         { id: 'x3', label: 'Add 3 rounds', hint: 'action', run: () => void rs.extend(3) },
         { id: 'stop', label: 'Stop the deliberation', hint: 'action', run: () => void rs.stop() },
+        { id: 'interrupt', label: 'Interrupt now with the message in the composer', hint: '⌘⏎', run: interruptWith },
       )
     }
+
+    // Jump to a researcher: their settings.
+    const agents: Command[] = rs.boot.agents.map(a => ({
+      id: `agent-${a.id}`, label: `Researcher · ${a.name}`, hint: a.brain,
+      run: () => setAgentSheet({ agent: a }),
+    }))
 
     const rooms: Command[] = rs.boot.rooms.map(r => ({
       id: `room-${r.id}`,
@@ -306,8 +328,8 @@ export function App() {
       run: () => rs.setRoomId(r.id),
     }))
 
-    return [...actions, ...rooms]
-  }, [rs, flash, call])
+    return [...actions, ...rooms, ...agents]
+  }, [rs, flash, call, saveRoom, interruptWith, showInspector])
 
   // An unexplained blank window is the worst possible failure mode for a
   // desktop app, so say what is happening and what to do if it stalls.
@@ -464,10 +486,7 @@ export function App() {
             deliberation={rs.active} roster={roster} activity={rs.activity}
             ledger={rs.ledger} messages={rs.messages}
             onExtend={by => void rs.extend(by)} onStop={() => void rs.stop()}
-            onInterrupt={() => {
-              if (!draft.trim()) return flash('Write your steer first, then interrupt')
-              void rs.send(draft.trim(), null).then(() => { setDraft(''); void rs.interrupt() })
-            }}
+            onInterrupt={interruptWith}
           />
         )}
 
@@ -542,7 +561,9 @@ export function App() {
               : 'Message the room…'}
             onChange={e => setDraft(e.target.value)}
             onKeyDown={e => {
-              if (e.key === 'Enter' && (e.metaKey || !e.shiftKey)) { e.preventDefault(); submit() }
+              // ⌘⏎ during a run interrupts with this message (plan §8); otherwise it sends.
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && rs.active) { e.preventDefault(); interruptWith() }
+              else if (e.key === 'Enter' && (e.metaKey || !e.shiftKey)) { e.preventDefault(); submit() }
             }}
           />
           <button className="primary" onClick={submit}>Send</button>
