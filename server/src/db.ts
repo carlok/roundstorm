@@ -859,15 +859,16 @@ export interface SearchHit {
   snippet: string
 }
 
-export function searchMessages(query: string, limit = 60): SearchHit[] {
+export function searchMessages(query: string, limit = 60, roomId?: string): SearchHit[] {
   const q = query.trim()
   if (q.length < 2) return []
+  const like = `%${q.replace(/[%_\\]/g, c => '\\' + c)}%`
   const rows = db.prepare(`
     SELECT m.*, r.name AS room_name FROM messages m
     JOIN rooms r ON r.id = m.room_id
-    WHERE m.sealed = 0 AND m.body LIKE ? ESCAPE '\\'
+    WHERE m.sealed = 0 AND m.body LIKE ? ESCAPE '\\' ${roomId ? 'AND m.room_id = ?' : ''}
     ORDER BY m.seq DESC LIMIT ?`)
-    .all(`%${q.replace(/[%_\\]/g, c => '\\' + c)}%`, limit) as any[]
+    .all(...(roomId ? [like, roomId, limit] : [like, limit])) as any[]
   return rows.map(r => {
     const m = toMessage(r)
     const at = m.body.toLowerCase().indexOf(q.toLowerCase())

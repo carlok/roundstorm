@@ -367,3 +367,52 @@ test('the synthesise route answers 404 and 409 rather than starting nonsense', a
   assert.equal(res.status, 409)
   assert.match((await res.json()).error, /still running/)
 })
+
+// --- sources, export, search scope (#96, #95, #100) ---
+
+test('a source can be added by hand, and pasted evidence reaches the prompt', async () => {
+  const { composeContext } = await import('./deliberation/context.ts')
+  const r = room('evidence-room')
+  assert.equal((await post('/api/rooms/nope/sources', { title: 'x' })).status, 404)
+  assert.equal((await post(`/api/rooms/${r.id}/sources`, { title: '  ' })).status, 400)
+  assert.equal((await post(`/api/rooms/${r.id}/sources`, { title: 'x', url: 'javascript:alert(1)' })).status, 400)
+  assert.equal((await post(`/api/rooms/${r.id}/sources`, { title: 'x', snapshot: 'y'.repeat(20_001) })).status, 400)
+
+  const res = await post(`/api/rooms/${r.id}/sources`, { title: 'Bench run 3', snapshot: 'PASTED-EVIDENCE: peak at 0.47x' })
+  assert.equal(res.status, 200)
+  const src = await res.json()
+  assert.equal(src.kind, 'note')
+  assert.ok(db.listEvents(r.id).some(e => e.type === 'source.added'))
+
+  const agent = db.getAgent(r.memberIds[0])!
+  const prompt = composeContext({
+    agent, room: db.getRoom(r.id)!, roster: [agent], round: 1, history: [], steers: [], schemaEnforced: true,
+    deliberation: { id: 'd', roomId: r.id, mode: 'deliberation', rounds: 1, style: 'parallel', sealedOpening: false,
+      status: 'running', currentRound: 1, question: 'q', tier: 'reasoning', createdAt: 0, endedAt: null } as never,
+  }).userPrompt
+  assert.ok(prompt.includes('PASTED-EVIDENCE: peak at 0.47x'), 'the pasted text never reached the agents')
+})
+
+test('keyword search can be scoped to one room', async () => {
+  const a = room('scope-a'), b = room('scope-b')
+  db.insertMessage({ roomId: a.id, authorType: 'human', body: 'SCOPE-WORD in room a' })
+  db.insertMessage({ roomId: b.id, authorType: 'human', body: 'SCOPE-WORD in room b' })
+  const all = await (await fetch(`${origin}/api/search?q=SCOPE-WORD&semantic=0`)).json()
+  assert.equal(all.hits.filter((h: any) => [a.id, b.id].includes(h.roomId)).length, 2)
+  const one = await (await fetch(`${origin}/api/search?q=SCOPE-WORD&semantic=0&roomId=${b.id}`)).json()
+  assert.deepEqual(one.hits.map((h: any) => h.roomId), [b.id])
+})
+
+test('a room export is saved as a file, in Markdown or JSON', async () => {
+  const { readFileSync } = await import('node:fs')
+  process.env.ROUNDSTORM_BACKUP_DIR = mkdtempSync(join(tmpdir(), 'rs-export-'))
+  const r = room('Export Me!')
+  db.insertMessage({ roomId: r.id, authorType: 'human', body: 'EXPORT-MARK' })
+  const md = await (await post(`/api/rooms/${r.id}/export`, { format: 'markdown' })).json()
+  assert.match(md.path, /roundstorm-export-me-.*\.md$/)
+  assert.ok(readFileSync(md.path, 'utf8').includes('EXPORT-MARK'))
+  const js = await (await post(`/api/rooms/${r.id}/export`, { format: 'json' })).json()
+  assert.equal(JSON.parse(readFileSync(js.path, 'utf8')).room.id, r.id)
+  assert.equal((await post('/api/rooms/nope/export', {})).status, 404)
+  delete process.env.ROUNDSTORM_BACKUP_DIR
+})

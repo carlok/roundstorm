@@ -192,8 +192,17 @@ export function App() {
       { label: 'Open', onSelect: () => rs.setRoomId(room.id) },
       { label: 'Rename…', onSelect: rename },
       { label: 'Edit cast…', onSelect: () => setRoomSheet({ room }) },
-      { label: `Export ${room.kind === 'dm' ? 'chat' : 'room'} as Markdown`,
-        onSelect: () => { window.open(apiUrl(`/api/rooms/${room.id}/export?format=markdown`), '_blank') } },
+      // Saved to disk by the daemon: window.open on a download navigated the
+      // desktop app's own window away from the UI.
+      ...(['markdown', 'json'] as const).map(format => ({
+        label: `Save ${room.kind === 'dm' ? 'chat' : 'room'} as ${format === 'json' ? 'JSON' : 'Markdown'}`,
+        onSelect: async () => {
+          const r = await call(`/api/rooms/${room.id}/export`, {
+            method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ format }),
+          }, 'Export failed')
+          if (r) flash(`Saved to ${(await r.json().catch(() => ({}))).path}`, 4000)
+        },
+      })),
       { label: 'Clear room — messages and memory…', danger: true, onSelect: () => setAsk({
         title: `Clear “${room.name}”?`,
         detail: 'Deletes the messages, positions, sources, results and everything the agents remembered from this room — including memory cards you already accepted. The room and its cast stay.',
@@ -487,6 +496,7 @@ export function App() {
               return card
                 ? <ResultCardView key={card.id} card={card}
                     onCopy={c => { void copyText(resultToMarkdown(c)); flash('Result copied') }}
+                    onCopyJson={c => { void copyText(JSON.stringify(c, null, 2)); flash('Result copied as JSON') }}
                     onSynthesise={async c => !!await call(`/api/deliberations/${c.deliberationId}/synthesise`,
                       { method: 'POST' }, 'Could not synthesise')} />
                 : null
@@ -577,6 +587,7 @@ export function App() {
 
       {globalSearch && (
         <GlobalSearch
+          room={rs.room ? { id: rs.room.id, name: rs.room.name } : null}
           onClose={() => setGlobalSearch(false)}
           onOpen={(rid, mid) => {
             setGlobalSearch(false)
@@ -620,6 +631,7 @@ export function App() {
           positions={rs.positions} sources={rs.sources} roster={roster}
           roomId={rs.roomId} agentById={rs.agentById}
           onCite={t => setDraft(d => `${t}: ` + d)}
+          onSourcesChanged={() => void rs.reload()}
         />
       )}
 

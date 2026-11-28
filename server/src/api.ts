@@ -1,5 +1,5 @@
 import express from 'express'
-import { createReadStream, mkdirSync, rmSync, statSync } from 'node:fs'
+import { createReadStream, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { homedir, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -136,10 +136,30 @@ export function makeApi() {
     res.json(card)
   })
 
+  /**
+   * A source added by the human: a URL, or pasted evidence. Sources go into every
+   * prompt in the room, so this is a direct way to steer a discussion with data.
+   */
   api.post('/rooms/:id/sources', (req, res) => {
+    const room = db.getRoom(req.params.id)
+    if (!room) return res.status(404).json({ error: 'no such room' })
     const { url, title, kind, snapshot } = req.body ?? {}
-    if (!title) return res.status(400).json({ error: 'title required' })
-    res.json(db.upsertSource(req.params.id, { url, title, kind, snapshot }))
+    if (typeof title !== 'string' || !title.trim()) return res.status(400).json({ error: 'title required' })
+    if (url != null && url !== '' && !(typeof url === 'string' && /^https?:\/\/\S+$/i.test(url.trim()))) {
+      return res.status(400).json({ error: 'url must be an http(s) address' })
+    }
+    if (snapshot != null && (typeof snapshot !== 'string' || snapshot.length > 20_000)) {
+      return res.status(400).json({ error: 'pasted text must be at most 20,000 characters' })
+    }
+    const KINDS = ['web', 'file', 'calculation', 'dataset', 'note']
+    const cleanUrl = typeof url === 'string' && url.trim() ? url.trim() : null
+    const source = db.upsertSource(room.id, {
+      url: cleanUrl, title: title.trim(),
+      kind: KINDS.includes(kind) ? kind : cleanUrl ? 'web' : 'note',
+      snapshot: typeof snapshot === 'string' && snapshot.trim() ? snapshot.trim() : null,
+    })
+    db.logEvent('source.added', { roomId: room.id, payload: { label: source.label, by: 'human' } })
+    res.json(source)
   })
 
   /**
@@ -150,7 +170,7 @@ export function makeApi() {
   api.get('/search', async (req, res) => {
     const q = typeof req.query.q === 'string' ? req.query.q : ''
     const [keyword, semantic] = await Promise.all([
-      Promise.resolve(db.searchMessages(q)),
+      Promise.resolve(db.searchMessages(q, 60, typeof req.query.roomId === 'string' ? req.query.roomId : undefined)),
       req.query.semantic === '0' ? Promise.resolve(null)
         : semanticSearch(q, 25, { roomId: typeof req.query.roomId === 'string' ? req.query.roomId : undefined }),
     ])
@@ -192,6 +212,29 @@ export function makeApi() {
     res.json(r)
   })
 
+  /**
+   * Save a room export as a file, for the desktop app: the same reason as the
+   * backup below (a WKWebView can navigate away from the UI when it follows a
+   * download link). The GET stays for browsers and scripts.
+   */
+  api.post('/rooms/:id/export', (req, res) => {
+    const payload = exportPayload(req.params.id)
+    if (!payload) return res.status(404).json({ error: 'no such room' })
+    const json = req.body?.format === 'json'
+    const slug = payload.room.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'room'
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
+    const dir = saveDir()
+    const path = join(dir, `roundstorm-${slug}-${stamp}.${json ? 'json' : 'md'}`)
+    try {
+      mkdirSync(dir, { recursive: true })
+      writeFileSync(path, json ? JSON.stringify(payload, null, 2) : renderResultMarkdown(payload))
+      db.logEvent('room.exported', { roomId: payload.room.id, payload: { format: json ? 'json' : 'markdown', path } })
+      res.json({ ok: true, path })
+    } catch (err) {
+      res.status(500).json({ error: `export failed: ${String(err)}` })
+    }
+  })
+
   api.get('/rooms/:id/export', (req, res) => {
     const room = db.getRoom(req.params.id)
     if (!room) return res.status(404).json({ error: 'no such room' })
@@ -228,7 +271,7 @@ export function makeApi() {
     // directory trees anywhere the daemon's user can write. No caller ever sent
     // it — both buttons POST with no body — so the parameter was pure surface.
     // The env var keeps the escape hatch somewhere a web page cannot set it.
-    const dir = process.env.ROUNDSTORM_BACKUP_DIR?.trim() || join(homedir(), 'Downloads')
+    const dir = saveDir()
     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
     const path = join(dir, `roundstorm-${stamp}.db`)
     try {
@@ -639,6 +682,12 @@ function memberCheck(memberIds: unknown): string | null {
   const unknown = db.unknownAgents(memberIds)
   return unknown.length ? `no such agent: ${unknown.join(', ')}` : null
 }
+
+/**
+ * Where saved files go: ROUNDSTORM_BACKUP_DIR, else Downloads. Never a caller-
+ * supplied path, so a page that can reach the API cannot choose where to write.
+ */
+const saveDir = () => process.env.ROUNDSTORM_BACKUP_DIR?.trim() || join(homedir(), 'Downloads')
 
 function currentRun(roomId: string): string | undefined {
   const active = db.activeDeliberation(roomId)

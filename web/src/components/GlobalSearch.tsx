@@ -14,11 +14,15 @@ interface Status { available: boolean; model: string; indexed: number; pending: 
  * kind of match you got. When no local embedder is running, that is stated
  * rather than silently falling back to keyword only.
  */
-export function GlobalSearch({ onOpen, onClose }: {
+export function GlobalSearch({ onOpen, onClose, room }: {
   onOpen: (roomId: string, messageId: string) => void
   onClose: () => void
+  /** The open room, offered as a narrower scope. */
+  room?: { id: string; name: string } | null
 }) {
   const [q, setQ] = useState('')
+  const [scope, setScope] = useState<'all' | 'room'>('all')
+  const roomId = scope === 'room' && room ? room.id : null
   const [hits, setHits] = useState<Hit[]>([])
   const [semantic, setSemantic] = useState<Hit[] | null>(null)
   const [status, setStatus] = useState<Status | null>(null)
@@ -34,13 +38,13 @@ export function GlobalSearch({ onOpen, onClose }: {
     if (q.trim().length < 3) { setHits([]); setSemantic(null); return }
     const id = setTimeout(() => {
       setBusy(true)
-      void api(`/api/search?q=${encodeURIComponent(q)}`)
+      void api(`/api/search?q=${encodeURIComponent(q)}${roomId ? `&roomId=${encodeURIComponent(roomId)}` : ''}`)
         .then(r => r.json())
         .then(d => { setHits(d.hits ?? []); setSemantic(d.semantic ?? null) })
         .finally(() => setBusy(false))
     }, 220)
     return () => clearTimeout(id)
-  }, [q])
+  }, [q, roomId])
 
   const reindex = async () => {
     setBusy(true)
@@ -53,11 +57,17 @@ export function GlobalSearch({ onOpen, onClose }: {
     <div className="sheet-backdrop" onMouseDown={onClose}>
       <div className="gsearch" onMouseDown={e => e.stopPropagation()}>
         <input
-          ref={input} value={q} placeholder="Search every room…"
+          ref={input} value={q} placeholder={roomId ? `Search “${room!.name}”…` : 'Search every room…'}
           onChange={e => setQ(e.target.value)}
           onKeyDown={e => { if (e.key === 'Escape') onClose() }}
         />
 
+        {room && (
+          <div className="gsearch-scope" role="radiogroup" aria-label="Search scope">
+            <button className={scope === 'all' ? 'sel' : ''} aria-pressed={scope === 'all'} onClick={() => setScope('all')}>Every room</button>
+            <button className={scope === 'room' ? 'sel' : ''} aria-pressed={scope === 'room'} onClick={() => setScope('room')}>Only “{room.name}”</button>
+          </div>
+        )}
         <div className="gsearch-status">
           {status?.available
             ? <>Semantic search on · {status.model.split('/').pop()} · {status.indexed} indexed
