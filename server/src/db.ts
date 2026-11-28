@@ -614,6 +614,41 @@ export function listEvents(roomId: string | null, limit = 500): LogEntry[] {
   })).reverse()
 }
 
+const toLogEntry = (r: any): LogEntry => ({
+  id: r.id, ts: r.ts, type: r.type, roomId: r.room_id,
+  deliberationId: r.deliberation_id, agentId: r.agent_id,
+  payload: safeParse<unknown>(r.payload, null),
+})
+
+/**
+ * What was recorded about the turn that produced a message: its
+ * `turn.completed` event, the `turn.started` that preceded it for the same agent
+ * and run, and any tier downgrade logged in between.
+ *
+ * Queried by message id. It used to scan the newest 5,000 events in JavaScript,
+ * so an older message simply had "no context recorded".
+ */
+export function turnContext(messageId: string):
+    { started: LogEntry | null; completed: LogEntry; downgraded: LogEntry | null } | null {
+  const done = db.prepare(`SELECT * FROM events WHERE type='turn.completed'
+      AND json_extract(payload,'$.messageId')=? ORDER BY id DESC LIMIT 1`).get(messageId) as any
+  if (!done) return null
+  const sameTurn = `agent_id IS ? AND deliberation_id IS ? AND id < ?`
+  const started = db.prepare(`SELECT * FROM events WHERE type='turn.started' AND ${sameTurn}
+      ORDER BY id DESC LIMIT 1`).get(done.agent_id, done.deliberation_id, done.id) as any
+  const downgraded = started
+    ? db.prepare(`SELECT * FROM events WHERE type='tier.downgraded' AND ${sameTurn} AND id > ?
+        ORDER BY id DESC LIMIT 1`).get(done.agent_id, done.deliberation_id, started.id,
+          (db.prepare(`SELECT IFNULL(MAX(id),0) AS id FROM events WHERE type='turn.started'
+            AND ${sameTurn}`).get(done.agent_id, done.deliberation_id, started.id) as any).id) as any
+    : null
+  return {
+    started: started ? toLogEntry(started) : null,
+    completed: toLogEntry(done),
+    downgraded: downgraded ? toLogEntry(downgraded) : null,
+  }
+}
+
 export const DATA_PATH = DATA_DIR
 
 // ---------- positions ledger ----------

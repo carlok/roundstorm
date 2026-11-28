@@ -16,6 +16,7 @@ import { PersonaLab } from './components/PersonaLab.tsx'
 import { AgentEditor } from './components/AgentEditor.tsx'
 import { RoomEditor } from './components/RoomEditor.tsx'
 import { Ask, type AskSpec } from './components/Ask.tsx'
+import { TurnContextSheet } from './components/TurnContextSheet.tsx'
 import { Manual } from './components/Manual.tsx'
 import { LoadExperiment } from './components/LoadExperiment.tsx'
 import { copyText, messageToMarkdown, resultToMarkdown, transcriptToMarkdown } from './lib/clipboard.ts'
@@ -44,6 +45,7 @@ export function App() {
   const [agentSheet, setAgentSheet] = useState<{ agent: Agent | null } | null>(null)
   const [roomSheet, setRoomSheet] = useState<{ room: Room | null } | null>(null)
   const [ask, setAsk] = useState<AskSpec | null>(null)
+  const [contextFor, setContextFor] = useState<Message | null>(null)
   const [manual, setManual] = useState(false)
   const [loadExp, setLoadExp] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
@@ -207,6 +209,10 @@ export function App() {
         confirmLabel: 'Create',
         onConfirm: name => void rs.fork(name, rs.room?.memberIds ?? [], [m.id]),
       }) },
+      ...(m.authorType === 'agent' ? [{
+        label: `What did ${agent?.name ?? 'this agent'} see?`,
+        onSelect: () => setContextFor(m),
+      }] : []),
       ...(m.claims.length ? [{
         label: `Copy ${m.claims.length} claim${m.claims.length === 1 ? '' : 's'}`,
         onSelect: () => {
@@ -515,6 +521,10 @@ export function App() {
 
       {menu && <ContextMenu {...menu} onClose={() => setMenu(null)} />}
       {ask && <Ask spec={ask} onClose={() => setAsk(null)} />}
+      {contextFor && (
+        <TurnContextSheet message={contextFor} author={rs.agentById(contextFor.authorId)?.name ?? 'the agent'}
+                          onClose={() => setContextFor(null)} />
+      )}
       {manual && <Manual onClose={() => setManual(false)} />}
 
       {loadExp && (

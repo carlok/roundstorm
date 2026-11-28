@@ -281,3 +281,51 @@ test('a transaction lands all of its writes or none of them', () => {
   assert.ok(!db.listRooms().some(r => r.name === 'tx-room'), 'a write survived the rollback')
   assert.equal(db.tx(() => db.createRoom(p.id, 'tx-ok', 'room', []).name), 'tx-ok')
 })
+
+// --- inspectability (#83, #84) ---
+
+test('a turn\'s recorded context is found by message id, however old', async () => {
+  const r = room('context-room')
+  const agentId = r.memberIds[0]
+  const d = db.createDeliberation({
+    roomId: r.id, mode: 'deliberation', rounds: 1, style: 'parallel', sealedOpening: false,
+    status: 'complete', currentRound: 1, question: 'q', tier: 'reasoning',
+  } as never)
+  const m = db.insertMessage({ roomId: r.id, authorType: 'agent', authorId: agentId, body: 'x', round: 1, deliberationId: d.id })
+  db.logEvent('tier.downgraded', { roomId: r.id, deliberationId: d.id, agentId,
+    payload: { requested: 'full', granted: 'research', reason: 'no working directory set for this project' } })
+  db.logEvent('turn.started', { roomId: r.id, deliberationId: d.id, agentId,
+    payload: { round: 1, tier: 'research', sections: [{ name: 'question', chars: 10 }], steers: ['STEER-X'] } })
+  db.logEvent('turn.completed', { roomId: r.id, deliberationId: d.id, agentId, payload: { messageId: m.id, claims: 1 } })
+  // Bury it: the old lookup only scanned the newest 5,000 events.
+  for (let i = 0; i < 5_100; i++) db.logEvent('noise')
+
+  const res = await fetch(`${origin}/api/messages/${m.id}/context`)
+  assert.equal(res.status, 200, 'an older message had "no context recorded"')
+  const body = await res.json()
+  assert.deepEqual(body.context.steers, ['STEER-X'])
+  assert.equal(body.downgraded.reason, 'no working directory set for this project')
+  assert.equal((await fetch(`${origin}/api/messages/nope/context`)).status, 404)
+})
+
+test('a memory card can be edited and forgotten, and a forgotten card leaves the prompt', async () => {
+  const { composeContext } = await import('./deliberation/context.ts')
+  const r = room('memory-room')
+  const agent = db.getAgent(r.memberIds[0])!
+  const card = db.proposeMemory({ agentId: agent.id, projectId: r.projectId, roomId: r.id, scope: 'project',
+    type: 'result', text: 'The original wording of a card', sourceMessageId: null })
+  const compose = () => composeContext({
+    agent, room: db.getRoom(r.id)!, roster: [agent], round: 1, history: [], steers: [], schemaEnforced: true,
+    deliberation: { id: 'd', roomId: r.id, mode: 'deliberation', rounds: 1, style: 'parallel', sealedOpening: false,
+      status: 'running', currentRound: 1, question: 'q', tier: 'reasoning', createdAt: 0, endedAt: null } as never,
+  }).userPrompt
+
+  assert.equal((await patch(`/api/memory/${card.id}`, { status: 'accepted', text: 'short' })).status, 400)
+  assert.equal((await patch(`/api/memory/nope`, { status: 'accepted' })).status, 404)
+  const kept = await patch(`/api/memory/${card.id}`, { status: 'accepted', text: '  The corrected wording of a card  ' })
+  assert.equal(kept.status, 200)
+  assert.ok(compose().includes('The corrected wording of a card'), 'the edit did not reach the prompt')
+
+  assert.equal((await patch(`/api/memory/${card.id}`, { status: 'rejected' })).status, 200)
+  assert.ok(!compose().includes('The corrected wording'), 'a forgotten card still reached the prompt')
+})
