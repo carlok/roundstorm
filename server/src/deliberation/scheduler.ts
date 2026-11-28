@@ -86,6 +86,34 @@ export function abortAllDeliberations(): number {
   return n
 }
 
+const resynthesising = new Set<string>()
+
+/**
+ * "Synthesise what was said" after a Stop (or any run whose card no synthesiser
+ * wrote). Stop cancels synthesis along with the turns, so a stopped run got a
+ * card holding only the ledger's leading title. This writes that card properly,
+ * in place, under its own deadline. Runs in the background; the card arrives on
+ * the event stream.
+ */
+export function resynthesise(id: string):
+    'started' | 'no-such-deliberation' | 'still-running' | 'already-synthesised' | 'in-progress' {
+  const d = db.getDeliberation(id)
+  if (!d) return 'no-such-deliberation'
+  if (running.has(id) || d.status === 'running' || d.status === 'stopping') return 'still-running'
+  if (resynthesising.has(id)) return 'in-progress'
+  const existing = db.listResults(d.roomId).filter(c => c.deliberationId === id).at(-1)
+  if (existing && existing.narrated !== false) return 'already-synthesised'
+
+  resynthesising.add(id)
+  const deadline = new AbortController()
+  const timer = setTimeout(() => deadline.abort(), TURN_TIMEOUT_MS)
+  db.logEvent('synthesis.requested', { roomId: d.roomId, deliberationId: id })
+  void synthesise(id, deadline.signal, { replaceId: existing?.id })
+    .catch(err => db.logEvent('synthesis.failed', { roomId: d.roomId, deliberationId: id, payload: { error: String(err) } }))
+    .finally(() => { clearTimeout(timer); resynthesising.delete(id) })
+  return 'started'
+}
+
 export function extendDeliberation(id: string, by: number) {
   const d = db.getDeliberation(id)
   if (!d) return

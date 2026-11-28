@@ -10,7 +10,7 @@ import { tokenFrom, tokenOk, warnUnauthorised } from './http/auth.ts'
 import { ALL_PERSONAS } from './deliberation/personas.ts'
 import { MODE_BLURB, MODE_LABEL } from './deliberation/context.ts'
 import { adapterIds, listBrainOptions, probeBrains } from './adapters/registry.ts'
-import { extendDeliberation, interruptDeliberation, startDeliberation, stopDeliberation } from './deliberation/scheduler.ts'
+import { extendDeliberation, interruptDeliberation, resynthesise, startDeliberation, stopDeliberation } from './deliberation/scheduler.ts'
 import { summarise } from './deliberation/ledger.ts'
 import { exportPayload, renderResultMarkdown } from './deliberation/export.ts'
 import { embedderStatus, indexPending, semanticSearch } from './search/embeddings.ts'
@@ -549,6 +549,18 @@ export function makeApi() {
     if (!db.getDeliberation(req.params.id)) return res.status(404).json({ error: 'no such deliberation' })
     stopDeliberation(req.params.id)
     res.json(db.getDeliberation(req.params.id))
+  })
+
+  api.post('/deliberations/:id/synthesise', (req, res) => {
+    const outcome = resynthesise(req.params.id)
+    const status = { 'started': 202, 'no-such-deliberation': 404 }[outcome as string] ?? 409
+    const message: Record<string, string> = {
+      'still-running': 'the deliberation is still running; its synthesis comes at the end',
+      'in-progress': 'already synthesising this one',
+      'already-synthesised': 'this result was already written by a synthesiser',
+      'no-such-deliberation': 'no such deliberation',
+    }
+    res.status(status).json(outcome === 'started' ? { ok: true } : { error: message[outcome] })
   })
 
   api.post('/deliberations/:id/extend', (req, res) => {

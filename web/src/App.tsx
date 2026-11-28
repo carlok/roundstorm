@@ -486,7 +486,9 @@ export function App() {
               const card = rs.results.find(r => r.id === item.message.body.slice(11))
               return card
                 ? <ResultCardView key={card.id} card={card}
-                    onCopy={c => { void copyText(resultToMarkdown(c)); flash('Result copied') }} />
+                    onCopy={c => { void copyText(resultToMarkdown(c)); flash('Result copied') }}
+                    onSynthesise={async c => !!await call(`/api/deliberations/${c.deliberationId}/synthesise`,
+                      { method: 'POST' }, 'Could not synthesise')} />
                 : null
             }
             return item.kind === 'divider' ? (

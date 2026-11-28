@@ -39,7 +39,11 @@ const RESULT_SCHEMA = {
 
 export async function synthesise(
   deliberationId: string, signal: AbortSignal,
-  opts: { conclave?: { reached: boolean } } = {},
+  opts: {
+    conclave?: { reached: boolean }
+    /** Rewrite this existing card in place instead of adding a new one. */
+    replaceId?: string
+  } = {},
 ): Promise<ResultCard | null> {
   const d = db.getDeliberation(deliberationId)
   if (!d) return null
@@ -54,10 +58,11 @@ export async function synthesise(
   const level = resolveLevel(d, ledger.level, opts.conclave)
 
   let costUsd: number | null = null
-  const card = await narrate({
+  const narrated = await narrate({
     d, room: room.name, roster, messages, level, ledger, signal,
     onCost: usd => { costUsd = (costUsd ?? 0) + usd },
   })
+  const card = opts.replaceId ? { ...narrated, id: opts.replaceId } : narrated
   db.saveResult(card)
   db.logEvent('synthesis.completed', {
     roomId: d.roomId, deliberationId: d.id,
@@ -65,12 +70,15 @@ export async function synthesise(
   })
 
   // The card lands in the transcript as a pinned message so it is where the
-  // reader already is, not in a panel they have to go find.
-  const m = db.insertMessage({
-    roomId: d.roomId, authorType: 'system', body: `${RESULT_PREFIX}${card.id}`,
-    deliberationId: d.id,
-  })
-  bus.emit({ type: 'message', message: m })
+  // reader already is, not in a panel they have to go find. A rewrite keeps
+  // the pointer it already has.
+  if (!opts.replaceId) {
+    const m = db.insertMessage({
+      roomId: d.roomId, authorType: 'system', body: `${RESULT_PREFIX}${card.id}`,
+      deliberationId: d.id,
+    })
+    bus.emit({ type: 'message', message: m })
+  }
   bus.emit({ type: 'result', result: card })
 
   // Index the finished discussion for semantic search. Fire-and-forget: a
@@ -127,6 +135,7 @@ async function narrate(args: {
   onCost?: (usd: number) => void
 }): Promise<ResultCard> {
   const { d, room, roster, messages, level, ledger, signal } = args
+  const stopped = d.status === 'stopping' || d.status === 'stopped'
 
   const base: ResultCard = {
     id: db.uid(), deliberationId: d.id, roomId: d.roomId, level,
@@ -137,7 +146,8 @@ async function narrate(args: {
     proposalVersion: ledger.leading?.version,
     failureReason: level === 'conclave_failed'
       ? `No position was endorsed by every participant within ${d.rounds} rounds.`
-      : undefined,
+      : stopped ? `Stopped during round ${d.currentRound} of ${d.rounds}.` : undefined,
+    narrated: false,
   }
 
   // The report is parsed, not read, so prefer a brain that enforces the schema
@@ -172,7 +182,7 @@ Room: ${room}
 Mode: ${MODE_LABEL[d.mode]}
 Question: ${d.question}
 Participants: ${roster.map(a => a.name).join(', ')}
-
+${stopped ? `\nThe researcher stopped this run during round ${d.currentRound} of ${d.rounds}. Summarise what had been established by then, and do not write as if the discussion had finished.\n` : ''}
 ## The agreement level has already been computed from the record
 
 **${LEVEL_LABEL[level]}**
@@ -226,6 +236,7 @@ ${transcript}`
 
   return {
     ...base,
+    narrated: true,
     conclusion: pickConclusion(v.conclusion, base.conclusion, level),
     why: typeof v.why === 'string' ? v.why : '',
     commonGround: arr('commonGround'),
