@@ -24,6 +24,7 @@ import { api, apiUrl } from './lib/api.ts'
 import { installMathCopy } from './lib/mathcopy.ts'
 import { applyTitlebarInset } from './lib/api.ts'
 import type { Agent, Message, Room, Tier } from './types.ts'
+import { unseenAfter } from './lib/rooms.ts'
 
 
 export function App() {
@@ -61,11 +62,14 @@ export function App() {
   // One timer for the toast: a second flash used to be cut short by the first
   // one's timer clearing it.
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  const flash = useCallback((text: string) => {
+  const flash = useCallback((text: string, ms = 1600) => {
     setToast(text)
     clearTimeout(toastTimer.current)
-    toastTimer.current = setTimeout(() => setToast(null), 1600)
+    toastTimer.current = setTimeout(() => setToast(null), ms)
   }, [])
+
+  // A run in another room finished: say so, for long enough to read.
+  useEffect(() => { if (rs.notice) flash(rs.notice.text, 5000) }, [rs.notice, flash])
 
   /**
    * A mutating call that tells the user when it failed. Returns the response on
@@ -89,16 +93,32 @@ export function App() {
     [rs.room, rs.agentById])
 
   // Auto-scroll only when already at the bottom. Reading round 2 while round 3
-  // lands must not yank the viewport (plan §2.3).
+  // lands must not yank the viewport (plan §2.3). But say that it landed: the
+  // pill counts what arrived below while the reader was scrolled up.
+  const [unseen, setUnseen] = useState(0)
+  const seenCount = useRef(0)
   useEffect(() => {
     const el = scroller.current
     if (el && pinned.current) el.scrollTop = el.scrollHeight
+    // Read before the updater runs: React may call it after this effect returns.
+    const prev = seenCount.current, atBottom = pinned.current, now = rs.messages.length
+    setUnseen(u => unseenAfter(prev, now, u, atBottom))
+    seenCount.current = now
   }, [rs.messages])
+  useEffect(() => { setUnseen(0); seenCount.current = 0; pinned.current = true }, [rs.roomId])
 
   const onScroll = () => {
     const el = scroller.current
     if (!el) return
     pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+    if (pinned.current) setUnseen(0)
+  }
+
+  const toBottom = () => {
+    const el = scroller.current
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+    pinned.current = true
+    setUnseen(0)
   }
 
   const jump = useCallback((id: string) => {
@@ -320,7 +340,10 @@ export function App() {
         {rooms.map(r => (
           <div key={r.id} className={`room-row ${r.id === rs.roomId ? 'sel' : ''}`}
                onContextMenu={e => { e.preventDefault(); openRoomMenu(r, e.clientX, e.clientY) }}>
-            <button className="room-item" onClick={() => rs.setRoomId(r.id)}>{r.name}</button>
+            <button className="room-item" onClick={() => rs.setRoomId(r.id)}>
+              {r.name}
+              {rs.running.has(r.id) && <span className="room-running" title="A deliberation is running here" aria-label="running" />}
+            </button>
             <button className="row-more" title="Rename, edit cast, delete"
                     onClick={e => { e.stopPropagation(); openRoomMenu(r, e.clientX, e.clientY) }}>⋯</button>
           </div>
@@ -440,6 +463,11 @@ export function App() {
         )}
 
         <div className="transcript" ref={scroller} onScroll={onScroll}>
+          {unseen > 0 && (
+            <button className="new-pill" onClick={toBottom}>
+              {unseen} new ↓
+            </button>
+          )}
           {rs.messages.length === 0 && (
             <div className="empty">
               <p>Write the question once. They do the arguing.</p>

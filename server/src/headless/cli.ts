@@ -16,6 +16,13 @@ import { terminateAll } from '../adapters/spawn.ts'
 import { abortAllDeliberations } from '../deliberation/scheduler.ts'
 import { ALL_PERSONAS } from '../deliberation/personas.ts'
 import { renderOutcome, runBatch, runExperiment, writeOutput } from './run.ts'
+import { exportPayload, renderResultMarkdown } from '../deliberation/export.ts'
+
+/** The room's full Markdown export: transcript, ledger, sources and cards. */
+const transcriptOf = (roomId: string): string => {
+  const p = exportPayload(roomId)
+  return p ? renderResultMarkdown(p) : ''
+}
 
 const USAGE = `roundstorm — run a deliberation from a config file
 
@@ -25,20 +32,37 @@ const USAGE = `roundstorm — run a deliberation from a config file
   --out <file>    write the output to a file as well as stdout
   --quiet         suppress progress lines on stderr
   --dry-run       validate the file and print the plan without running anything
+  --transcript    include the whole discussion, not only the result card
+  --rounds <n>    override every experiment's round count (1-20)
+
+  node dist-server/cli.mjs --list-brains     the brain ids a config may use
+  node dist-server/cli.mjs --list-personas   the persona keys a config may use
 
 Exit codes: 0 concluded · 2 no reliable conclusion (or a conclave that failed)
             3 the run itself broke · 1 bad usage or invalid config
 `
 
-interface Options { file: string; json: boolean; out?: string; quiet: boolean; dryRun: boolean }
+interface Options {
+  file: string; json: boolean; out?: string; quiet: boolean; dryRun: boolean
+  transcript: boolean; rounds?: number
+}
 
 function parseArgs(argv: string[]): Options | null {
   const args = argv.slice(2)
   if (!args.length || args.includes('--help') || args.includes('-h')) return null
-  const opts: Options = { file: '', json: false, quiet: false, dryRun: false }
+  const opts: Options = { file: '', json: false, quiet: false, dryRun: false, transcript: false }
   for (let i = 0; i < args.length; i++) {
     const a = args[i]
     if (a === '--json') opts.json = true
+    else if (a === '--transcript') opts.transcript = true
+    else if (a === '--rounds') {
+      const n = Number(args[++i])
+      if (!Number.isInteger(n) || n < 1 || n > 20) {
+        process.stderr.write(`--rounds must be a whole number from 1 to 20 (got ${JSON.stringify(args[i] ?? '')})\n`)
+        return null
+      }
+      opts.rounds = n
+    }
     else if (a === '--quiet') opts.quiet = true
     else if (a === '--dry-run') opts.dryRun = true
     else if (a === '--out') opts.out = args[++i]
@@ -49,6 +73,18 @@ function parseArgs(argv: string[]): Options | null {
 }
 
 async function main(): Promise<number> {
+  // Listing needs no config file, and is how a user finds what a config may name
+  // without first writing a wrong one to read the error.
+  const argv = process.argv.slice(2)
+  if (argv.includes('--list-brains')) {
+    process.stdout.write(adapterIds().join('\n') + '\n')
+    return 0
+  }
+  if (argv.includes('--list-personas')) {
+    process.stdout.write(ALL_PERSONAS.map(p => `${p.key.padEnd(16)} ${p.label}`).join('\n') + '\n')
+    return 0
+  }
+
   const opts = parseArgs(process.argv)
   if (!opts) {
     process.stdout.write(USAGE)
@@ -79,6 +115,8 @@ async function main(): Promise<number> {
     process.stderr.write(err instanceof ConfigError ? `${opts.file}: ${err.message}\n` : String(err) + '\n')
     return 1
   }
+
+  if (opts.rounds !== undefined) for (const c of configs) c.rounds = opts.rounds
 
   const say = (line: string) => { if (!opts.quiet) process.stderr.write(`  ${line}\n`) }
 
@@ -118,8 +156,11 @@ async function main(): Promise<number> {
         costUsd: o.costUsd,
         pricedTurns: o.pricedTurns,
         ms: o.ms,
+        ...(opts.transcript ? { transcript: transcriptOf(o.room.id) } : {}),
       })), null, 2)
-    : outcomes.map(renderOutcome).join('\n\n---\n\n')
+    : outcomes.map(o => opts.transcript
+        ? `${renderOutcome(o)}\n\n---\n\n${transcriptOf(o.room.id)}`
+        : renderOutcome(o)).join('\n\n---\n\n')
 
   process.stdout.write(rendered + '\n')
   if (opts.out) {
