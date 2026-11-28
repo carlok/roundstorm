@@ -297,10 +297,13 @@ test('a turn\'s recorded context is found by message id, however old', async () 
   db.logEvent('turn.started', { roomId: r.id, deliberationId: d.id, agentId,
     payload: { round: 1, tier: 'research', sections: [{ name: 'question', chars: 10 }], steers: ['STEER-X'] } })
   db.logEvent('turn.completed', { roomId: r.id, deliberationId: d.id, agentId, payload: { messageId: m.id, claims: 1 } })
-  // Bury it: the old lookup only scanned the newest 5,000 events.
-  for (let i = 0; i < 5_100; i++) db.logEvent('noise')
+  // Bury it: the old lookup only scanned the newest 5,000 events. One
+  // transaction, so this takes milliseconds: written one by one it took long
+  // enough on the Windows runner for the server to drop the idle keep-alive
+  // socket, and the next fetch on it failed.
+  db.tx(() => { for (let i = 0; i < 5_100; i++) db.logEvent('noise') })
 
-  const res = await fetch(`${origin}/api/messages/${m.id}/context`)
+  const res = await fetch(`${origin}/api/messages/${m.id}/context`, { headers: { connection: 'close' } })
   assert.equal(res.status, 200, 'an older message had "no context recorded"')
   const body = await res.json()
   assert.deepEqual(body.context.steers, ['STEER-X'])
