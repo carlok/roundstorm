@@ -27,6 +27,10 @@ export function GlobalSearch({ onOpen, onClose, room }: {
   const [semantic, setSemantic] = useState<Hit[] | null>(null)
   const [status, setStatus] = useState<Status | null>(null)
   const [busy, setBusy] = useState(false)
+  // Keyboard selection over both lists, in the order they are shown, like ⌘K.
+  const [sel, setSel] = useState(0)
+  const results = [...(semantic ?? []), ...hits]
+  useEffect(() => { setSel(0) }, [hits, semantic])
   const input = useRef<HTMLInputElement>(null)
 
   useEffect(() => { input.current?.focus() }, [])
@@ -59,7 +63,12 @@ export function GlobalSearch({ onOpen, onClose, room }: {
         <input
           ref={input} value={q} placeholder={roomId ? `Search “${room!.name}”…` : 'Search every room…'}
           onChange={e => setQ(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Escape') onClose() }}
+          onKeyDown={e => {
+            if (e.key === 'Escape') onClose()
+            else if (e.key === 'ArrowDown') { e.preventDefault(); setSel(s => Math.min(s + 1, results.length - 1)) }
+            else if (e.key === 'ArrowUp') { e.preventDefault(); setSel(s => Math.max(s - 1, 0)) }
+            else if (e.key === 'Enter' && results[sel]) { e.preventDefault(); onOpen(results[sel].roomId, results[sel].message.id) }
+          }}
         />
 
         {room && (
@@ -81,15 +90,16 @@ export function GlobalSearch({ onOpen, onClose, room }: {
           {semantic && semantic.length > 0 && (
             <>
               <h4>By meaning</h4>
-              {semantic.map(h => (
-                <HitRow key={'s' + h.message.id} hit={h} onOpen={onOpen} showScore />
+              {semantic.map((h, i) => (
+                <HitRow key={'s' + h.message.id} hit={h} onOpen={onOpen} showScore selected={i === sel} />
               ))}
             </>
           )}
           {hits.length > 0 && (
             <>
               <h4>Exact matches</h4>
-              {hits.map(h => <HitRow key={'k' + h.message.id} hit={h} onOpen={onOpen} />)}
+              {hits.map((h, i) => <HitRow key={'k' + h.message.id} hit={h} onOpen={onOpen}
+                                          selected={(semantic?.length ?? 0) + i === sel} />)}
             </>
           )}
           {q.trim().length >= 3 && !busy && !hits.length && !semantic?.length && (
@@ -101,11 +111,13 @@ export function GlobalSearch({ onOpen, onClose, room }: {
   )
 }
 
-function HitRow({ hit, onOpen, showScore }: {
-  hit: Hit; onOpen: (roomId: string, messageId: string) => void; showScore?: boolean
+function HitRow({ hit, onOpen, showScore, selected }: {
+  hit: Hit; onOpen: (roomId: string, messageId: string) => void; showScore?: boolean; selected?: boolean
 }) {
   return (
-    <button className="hitrow" onClick={() => onOpen(hit.roomId, hit.message.id)}>
+    <button className={`hitrow${selected ? ' sel' : ''}`} aria-selected={selected}
+            ref={el => { if (selected) el?.scrollIntoView({ block: 'nearest' }) }}
+            onClick={() => onOpen(hit.roomId, hit.message.id)}>
       <div className="hitrow-meta">
         <span className="hitrow-room">{hit.roomName}</span>
         {hit.message.round != null && <span className="muted">Round {hit.message.round}</span>}
