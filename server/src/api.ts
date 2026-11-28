@@ -123,7 +123,12 @@ export function makeApi() {
     if (!['accepted', 'rejected', 'proposed'].includes(status)) {
       return res.status(400).json({ error: 'status must be accepted, rejected or proposed' })
     }
-    const card = db.setMemoryStatus(req.params.id, status, typeof text === 'string' ? text : undefined)
+    // Edited text gets the same bounds a proposal has (contract.ts coerceMemory).
+    if (text !== undefined && (typeof text !== 'string' || text.trim().length < 8 || text.trim().length > 600)) {
+      return res.status(400).json({ error: 'text must be 8 to 600 characters' })
+    }
+    const card = db.setMemoryStatus(req.params.id, status, typeof text === 'string' ? text.trim() : undefined)
+    if (!card) return res.status(404).json({ error: 'no such memory card' })
     db.logEvent('memory.reviewed', { payload: { id: req.params.id, status } })
     res.json(card)
   })
@@ -309,15 +314,13 @@ export function makeApi() {
 
   /** "What did Alice see?" — the exact composed context behind one message. */
   api.get('/messages/:id/context', (req, res) => {
-    const events = db.listEvents(null, 5000)
-      .filter(e => e.type === 'turn.started' || e.type === 'turn.completed')
-    const completed = events.find(e =>
-      e.type === 'turn.completed' && (e.payload as any)?.messageId === req.params.id)
-    if (!completed) return res.status(404).json({ error: 'no context recorded for that message' })
-    const started = [...events]
-      .filter(e => e.type === 'turn.started' && e.agentId === completed.agentId && e.id < completed.id)
-      .pop()
-    res.json({ context: started?.payload ?? null, outcome: completed.payload })
+    const found = db.turnContext(req.params.id)
+    if (!found) return res.status(404).json({ error: 'no context recorded for that message' })
+    res.json({
+      context: found.started?.payload ?? null,
+      outcome: found.completed.payload,
+      downgraded: found.downgraded?.payload ?? null,
+    })
   })
 
   api.post('/rooms', (req, res) => {

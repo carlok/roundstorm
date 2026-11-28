@@ -283,6 +283,17 @@ button.danger { color: var(--danger); }
   box-shadow: 0 18px 50px rgba(0,0,0,.3);
 }
 .sheet h2 { margin: 0 0 14px; font-size: 16px; }
+.tc-facts { margin: 0 0 14px; padding-left: 18px; font-size: 13px; line-height: 1.55; }
+.tc-sections { display: grid; gap: 6px; margin-bottom: 14px; }
+.tc-section { display: grid; grid-template-columns: 9.5em 1fr 6em; align-items: center; gap: 8px; font-size: 12.5px; }
+.tc-label { color: var(--fg-dim); }
+.tc-bar { height: 6px; background: var(--bg-alt); border-radius: 3px; overflow: hidden; }
+.tc-bar > span { display: block; height: 100%; background: var(--accent, var(--fg-faint)); }
+.tc-size { text-align: right; color: var(--fg-faint); font-variant-numeric: tabular-nums; }
+.tc-h { font-size: 13px; margin: 6px 0; }
+.tc-steer { margin: 0 0 8px; padding: 6px 10px; border-left: 3px solid var(--line); font-size: 13px; }
+.tc-outcome { font-size: 12.5px; }
+.tc-actions { display: flex; justify-content: flex-end; margin-top: 12px; }
 .field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 14px; }
 .field > span { font-size: 12.5px; font-weight: 600; }
 .field small { color: var(--fg-faint); font-size: 12px; }
@@ -440,6 +451,12 @@ button.danger { color: var(--danger); }
 .memcard {
   border: 1px solid var(--line); border-radius: 9px;
   padding: 9px 10px; margin-bottom: 9px; background: var(--bg);
+}
+.mem-h { margin: 14px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--fg-faint); }
+.mem-error { color: var(--danger); font-size: 12.5px; }
+.memcard-edit {
+  width: 100%; font: inherit; font-size: 12.5px; padding: 6px 8px; margin-bottom: 8px;
+  border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); resize: vertical;
 }
 .memcard-head { display: flex; align-items: center; gap: 6px; font-size: 12px; margin-bottom: 5px; }
 .memcard p { margin: 0 0 8px; font-size: 12.5px; line-height: 1.45; }
