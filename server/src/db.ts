@@ -308,14 +308,45 @@ export function listRooms(): Room[] {
 
 export const getRoom = (id: string): Room | undefined => listRooms().find(r => r.id === id)
 
+let txDepth = 0
+
+/**
+ * Run `fn` in one transaction: all of it lands or none of it does. Nested calls
+ * join the outer transaction.
+ */
+export function tx<T>(fn: () => T): T {
+  if (txDepth > 0) return fn()
+  db.exec('BEGIN IMMEDIATE')
+  txDepth++
+  try {
+    const out = fn()
+    db.exec('COMMIT')
+    return out
+  } catch (err) {
+    db.exec('ROLLBACK')
+    throw err
+  } finally {
+    txDepth--
+  }
+}
+
+/** Ids in `ids` that name no agent. Checked before a membership write, not after. */
+export function unknownAgents(ids: string[]): string[] {
+  const q = db.prepare('SELECT 1 FROM agents WHERE id=?')
+  return ids.filter(id => !q.get(id))
+}
+
 export function createRoom(
   projectId: string, name: string, kind: 'room' | 'dm', memberIds: string[], tier: Tier = 'research',
 ): Room {
   const id = uid()
-  db.prepare(`INSERT INTO rooms (id,project_id,name,kind,tier,created_at)
-              VALUES (?,?,?,?,?,?)`).run(id, projectId, name, kind, tier, now())
-  const ins = db.prepare('INSERT OR IGNORE INTO room_members (room_id,agent_id) VALUES (?,?)')
-  for (const m of memberIds) ins.run(id, m)
+  // One transaction: a bad member id used to leave a room row with no members.
+  tx(() => {
+    db.prepare(`INSERT INTO rooms (id,project_id,name,kind,tier,created_at)
+                VALUES (?,?,?,?,?,?)`).run(id, projectId, name, kind, tier, now())
+    const ins = db.prepare('INSERT OR IGNORE INTO room_members (room_id,agent_id) VALUES (?,?)')
+    for (const m of memberIds) ins.run(id, m)
+  })
   return getRoom(id)!
 }
 
@@ -399,10 +430,17 @@ export function setRoomTier(id: string, tier: Tier) {
   db.prepare('UPDATE rooms SET tier=? WHERE id=?').run(tier, id)
 }
 
+/**
+ * Replace a room's cast in one transaction. It used to delete the members and
+ * then insert one by one, so a single stale id hit the foreign key after the
+ * delete had run and the room was left with nobody in it.
+ */
 export function setRoomMembers(id: string, memberIds: string[]) {
-  db.prepare('DELETE FROM room_members WHERE room_id=?').run(id)
-  const ins = db.prepare('INSERT OR IGNORE INTO room_members (room_id,agent_id) VALUES (?,?)')
-  for (const m of memberIds) ins.run(id, m)
+  tx(() => {
+    db.prepare('DELETE FROM room_members WHERE room_id=?').run(id)
+    const ins = db.prepare('INSERT OR IGNORE INTO room_members (room_id,agent_id) VALUES (?,?)')
+    for (const m of memberIds) ins.run(id, m)
+  })
 }
 
 // ---------- messages ----------
@@ -684,6 +722,21 @@ const toMemory = (r: any): MemoryCard => ({
   scope: r.scope, type: r.type, text: r.text, status: r.status,
   sourceMessageId: r.source_message_id, createdAt: r.created_at, lastUsed: r.last_used,
 })
+
+/**
+ * Drop the proposals a run made outside the round it ended on.
+ *
+ * A conclave counts every round as closing, because it does not know which one is
+ * last until it tallies. Keeping every round's proposals filled the inbox with
+ * drafts of positions the room went on to revise (37 cards from one conclave).
+ * Accepted cards are never touched.
+ */
+export function pruneProposedMemory(deliberationId: string, keepRound: number): number {
+  const r = db.prepare(`DELETE FROM memory_cards WHERE status='proposed' AND source_message_id IN
+      (SELECT id FROM messages WHERE deliberation_id=? AND round IS NOT NULL AND round != ?)`)
+    .run(deliberationId, keepRound)
+  return r.changes
+}
 
 export function proposeMemory(c: Omit<MemoryCard, 'id' | 'createdAt' | 'lastUsed' | 'status'>): MemoryCard {
   const row = {

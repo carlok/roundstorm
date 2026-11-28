@@ -412,3 +412,59 @@ test('the synthesiser is given the final round of a long discussion, not just it
   assert.ok(call.userPrompt.includes('ROUND-6-OPENING ' + 'z'.repeat(1_000)), 'the final round was cut')
   assert.ok(call.userPrompt.length < 140_000, `synthesis prompt is ${call.userPrompt.length} chars`)
 })
+
+// --- run integrity (#78, #79) ---
+
+const inRound = (stub: Stub, r: number) => roundCalls(stub).filter(c => new RegExp(`Round ${r} of`).test(c.userPrompt))
+
+test('an interrupt re-runs only the turn it cut off, and every agent sees the steer once', async () => {
+  const { room: r, stubs, cleanup } = room(['Fast', 'Slow'], n => ({ delayMs: n === 'Fast' ? 10 : 400 }))
+  const d = deliberation(r.id, { rounds: 2 })
+  const run = startDeliberation(d)
+  setTimeout(() => {
+    db.insertMessage({ roomId: r.id, authorType: 'human', priority: true, body: 'INTERRUPT-STEER' })
+    interruptDeliberation(d.id)
+  }, 150)
+  await run
+  cleanup()
+
+  const fast = stubs.get('Fast')!, slow = stubs.get('Slow')!
+  assert.equal(inRound(fast, 1).length, 1, 'a turn that had finished was run again')
+  assert.equal(inRound(slow, 1).length, 2, 'the cut-off turn was not repeated')
+  const turns = db.listMessages(r.id).filter(m => m.deliberationId === d.id && m.authorType === 'agent' && m.round === 1)
+  assert.equal(turns.length, 2, 'round 1 should hold exactly one turn per agent')
+  assert.match(inRound(slow, 1)[1].userPrompt, /# PRIORITY[\s\S]*INTERRUPT-STEER/)
+  assert.match(inRound(fast, 2)[0].userPrompt, /# PRIORITY[\s\S]*INTERRUPT-STEER/,
+    'the agent whose turn was kept never saw the steer')
+  const ev = eventsOf(d.id, 'round.restarted')[0]
+  assert.deepEqual([(ev.payload as any).kept, (ev.payload as any).rerun], [1, 1])
+})
+
+test('an interrupt during the votes does not make the chair draft again', async () => {
+  const { room: r, stubs, cleanup } = room(['A', 'B'], n => ({ delayMs: n === 'A' ? 10 : 400 }))
+  const d = deliberation(r.id, { mode: 'conclave', rounds: 4 })
+  const run = startDeliberation(d)
+  setTimeout(() => interruptDeliberation(d.id), 150)
+  await run
+  cleanup()
+  const chairCalls = inRound(stubs.get('A')!, 1).filter(c => /You hold the chair/.test(c.userPrompt))
+  assert.equal(chairCalls.length, 1, 'the chair drafted twice in one round')
+  assert.equal(inRound(stubs.get('B')!, 1).length, 2)
+})
+
+test('a conclave keeps only the memory proposed in the round it ended on', async () => {
+  const { room: r, cleanup } = room(['A', 'B'], n => ({
+    turn: (c: { systemPrompt: string }) => rapporteur(c) ? synthOrTurn(c) : {
+      body: `turn by ${n}`, stance: 'propose', reply_to: '', claims: [{ text: 'c', basis: 'reasoned' }],
+      memory: [{ type: 'result', text: `A card worth keeping from ${n}` }],
+    },
+  }))
+  const d = deliberation(r.id, { mode: 'conclave', rounds: 4 })
+  await startDeliberation(d)
+  cleanup()
+  const msgs = new Map(db.listMessages(r.id).map(m => [m.id, m]))
+  const cards = db.listMemory({ status: 'proposed' }).filter(c => c.roomId === r.id)
+  assert.ok(cards.length > 0, 'no proposals at all')
+  assert.deepEqual([...new Set(cards.map(c => msgs.get(c.sourceMessageId!)?.round))], [4],
+    'proposals from earlier conclave rounds survived')
+})

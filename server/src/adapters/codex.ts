@@ -11,7 +11,8 @@
  *    auth.json back to the real one; a token refresh then propagates instead of
  *    going stale the way a copy would.
  */
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { AdapterEvent, BrainAdapter, TurnRequest } from './types.ts'
@@ -187,11 +188,23 @@ function readConfiguredModel(): string | null {
   }
 }
 
-function writeSchema(schema: unknown): string {
+/**
+ * Write a schema for `--output-schema` and return its path.
+ *
+ * Named by content. One shared file, rewritten every turn, let a synthesis in one
+ * room and a turn in another hand codex each other's schema. The same schema
+ * always maps to the same file, so there is still no litter to clean up.
+ */
+export function writeSchema(schema: unknown): string {
   const dir = join(DATA_PATH, 'brains')
   mkdirSync(dir, { recursive: true })
-  const path = join(dir, 'turn-schema.json')
-  // Stable path, rewritten each turn — no temp-file litter to clean up.
-  writeFileSync(path, JSON.stringify(schema))
+  const json = JSON.stringify(schema)
+  const path = join(dir, `schema-${createHash('sha256').update(json).digest('hex').slice(0, 12)}.json`)
+  // Written to a temporary name and renamed, so a reader never sees half a file.
+  if (!existsSync(path)) {
+    const tmp = `${path}.${process.pid}.${Date.now()}.tmp`
+    writeFileSync(tmp, json)
+    renameSync(tmp, path)
+  }
   return path
 }

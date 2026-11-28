@@ -123,6 +123,8 @@ export async function startDeliberation(deliberation: Deliberation) {
         pendingSteers, markSteersConsumed,
         takeInterrupt: () => takeInterrupt(deliberation.id),
       })
+      const last = db.getDeliberation(deliberation.id)?.currentRound
+      if (last) db.pruneProposedMemory(deliberation.id, last)
     } else {
       await runRounds(deliberation.id, running.get(deliberation.id)!.controller.signal)
     }
@@ -162,6 +164,12 @@ export async function startDeliberation(deliberation: Deliberation) {
 }
 
 async function runRounds(deliberationId: string, signal: AbortSignal) {
+  // After an interrupt: the agents whose turn was cut off, who are the only ones
+  // to run again. Null outside a repeated round.
+  let rerun: Set<string> | null = null
+  // An interrupt's steer is kept pending through the round after the repeat, so
+  // agents whose turn had already finished still see it once.
+  let deferSteers = false
   for (let round = 1; ; round++) {
     const d = db.getDeliberation(deliberationId)
     if (!d || d.status !== 'running') return
@@ -186,18 +194,30 @@ async function runRounds(deliberationId: string, signal: AbortSignal) {
     const baseHistory = historyFor(d, round)
     const steers = pendingSteers(d.roomId)
 
-    for (const a of roster) setActivity(room.id, a.id, 'waiting', 'Waiting', round)
+    // A repeated round runs only the agents whose turn the interrupt cut off.
+    // The tooltip promises the *in-flight* turns are discarded; re-running the
+    // ones that had already finished gave those agents two turns in one round.
+    const speakers: Agent[] = rerun ? roster.filter(a => rerun!.has(a.id)) : roster
+    const settled = new Set<string>()
+
+    for (const a of speakers) setActivity(room.id, a.id, 'waiting', 'Waiting', round)
 
     if (d.style === 'parallel') {
-      await Promise.all(roster.map(agent =>
-        runTurn({ agent, room, roster, deliberation: d, round, history: baseHistory, steers, sealed, signal })))
+      await Promise.all(speakers.map(async agent => {
+        if (await runTurn({ agent, room, roster, deliberation: d, round, history: baseHistory, steers, sealed, signal })) {
+          settled.add(agent.id)
+        }
+      }))
     } else {
       // Rotate so the last-speaker advantage moves around.
       const order = roster.slice(round % roster.length).concat(roster.slice(0, round % roster.length))
+        .filter(a => speakers.includes(a))
       for (const agent of order) {
         if (signal.aborted) break
         const history = historyFor(d, round, { sameRound: true })
-        await runTurn({ agent, room, roster, deliberation: d, round, history, steers, sealed, signal })
+        if (await runTurn({ agent, room, roster, deliberation: d, round, history, steers, sealed, signal })) {
+          settled.add(agent.id)
+        }
       }
     }
 
@@ -217,14 +237,24 @@ async function runRounds(deliberationId: string, signal: AbortSignal) {
     const restarted = takeInterrupt(deliberationId)
     if (restarted) {
       signal = restarted
+      rerun = new Set(speakers.filter(a => !settled.has(a.id)).map(a => a.id))
+      deferSteers = true
       db.logEvent('round.restarted', {
-        roomId: db.getDeliberation(deliberationId)?.roomId, deliberationId, payload: { round },
+        roomId: db.getDeliberation(deliberationId)?.roomId, deliberationId,
+        payload: { round, kept: settled.size, rerun: rerun.size },
       })
       round -= 1
       continue
     }
 
-    markSteersConsumed(steers)
+    rerun = null
+    // The round after the repeat is the one where every agent sees the steer.
+    if (deferSteers && round < (db.getDeliberation(deliberationId)?.rounds ?? round)) {
+      deferSteers = false
+    } else {
+      deferSteers = false
+      markSteersConsumed(steers)
+    }
     if (signal.aborted) return
   }
 }
@@ -273,7 +303,7 @@ export async function runTurn(args: {
   signal: AbortSignal
   /** Conclave uses this for the chair / devil's-seat / endorsement roles. */
   extraInstruction?: string
-}) {
+}): Promise<boolean> {
   const { agent, room, roster, deliberation, round, history, steers, sealed, signal } = args
   const adapter = getAdapter(agent.brain)
   if (!adapter) {
@@ -291,7 +321,7 @@ export async function runTurn(args: {
       round, deliberationId: deliberation.id,
     })
     bus.emit({ type: 'message', message: m })
-    return
+    return true
   }
 
   const requested = lowerTier(room.tier, agent.tierCeiling)
@@ -413,7 +443,7 @@ export async function runTurn(args: {
       round, deliberationId: deliberation.id,
     })
     bus.emit({ type: 'message', message: m })
-    return
+    return true
   }
 
   if (signal.aborted && !structured) {
@@ -422,7 +452,7 @@ export async function runTurn(args: {
       roomId: room.id, deliberationId: deliberation.id, agentId: agent.id,
       payload: { round, discardedChars: text.length },
     })
-    return
+    return false
   }
 
   if (errorMsg && !structured && !text) {
@@ -437,7 +467,7 @@ export async function runTurn(args: {
       round, deliberationId: deliberation.id,
     })
     bus.emit({ type: 'message', message: m })
-    return
+    return true
   }
 
   // Schema-enforced brains hand back an object. Prompted brains need extracting,
@@ -513,6 +543,7 @@ export async function runTurn(args: {
   if (!sealed) bus.emit({ type: 'message', message })
   else bus.emit({ type: 'activity', roomId: room.id, activity: {
     agentId: agent.id, state: 'done', detail: 'Committed', round, startedAt: null } })
+  return true
 }
 
 /**

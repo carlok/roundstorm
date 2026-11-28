@@ -27,7 +27,7 @@ export interface TurnRunner {
     agent: Agent; room: Room; roster: Agent[]; deliberation: Deliberation
     round: number; history: Message[]; steers: Message[]; sealed: boolean
     signal: AbortSignal; extraInstruction?: string
-  }): Promise<void>
+  }): Promise<boolean | void>
 }
 
 /**
@@ -75,7 +75,15 @@ export async function runConclave(
     reached: false, rounds: 0, positionId: null, version: 0, holdouts: [],
   }
 
+  // After an interrupt: what of the round had already finished, so only the
+  // turns that were cut off run again (see runRounds).
+  type Resume = { round: number; chairDone: boolean; rest: Set<string> }
+  let resume: Resume | null = null
+  let deferSteers = false
+
   for (let round = 1; round <= cap(); round++) {
+    const resuming: Resume | null = resume && resume.round === round ? resume : null
+    resume = null
     const d = db.getDeliberation(deliberationId)
     if (!d || d.status !== 'running' || signal.aborted) break
 
@@ -97,35 +105,50 @@ export async function runConclave(
     const steers = hooks.pendingSteers?.(d.roomId) ?? []
     const history = historyFor(d, round)
 
+    const rest = roster.filter(a => a.id !== chair.id)
+
     // Chair first: the room needs something concrete to attack.
-    await runTurn({
-      agent: chair, room, roster, deliberation: d, round, history, steers,
-      sealed: false, signal,
-      extraInstruction: chairInstruction(round),
-    })
-    if (signal.aborted) {
-      const next = restart(round)
-      if (!next) break
-      signal = next; round -= 1; continue
+    if (!resuming?.chairDone) {
+      const chairSettled = await runTurn({
+        agent: chair, room, roster, deliberation: d, round, history, steers,
+        sealed: false, signal,
+        extraInstruction: chairInstruction(round),
+      })
+      if (signal.aborted) {
+        const next = restart(round)
+        if (!next) break
+        resume = { round, chairDone: chairSettled === true, rest: new Set(rest.map(a => a.id)) }
+        deferSteers = true
+        signal = next; round -= 1; continue
+      }
     }
 
     // This run's history including the chair's new draft. Unfiltered, it carried
     // every message in the room, and under budget pressure the trimmer could keep
     // an older run's last round instead of the proposal being voted on.
     const afterChair = historyFor(d, round, { sameRound: true })
-    const rest = roster.filter(a => a.id !== chair.id)
+    const voters: Agent[] = resuming?.chairDone ? rest.filter(a => resuming.rest.has(a.id)) : rest
+    const settled = new Set<string>()
 
-    await Promise.all(rest.map(agent => runTurn({
-      agent, room, roster, deliberation: d, round,
-      history: afterChair, steers, sealed: false, signal,
-      extraInstruction: agent.id === devil.id ? DEVIL_INSTRUCTION : endorseInstruction(),
-    })))
+    await Promise.all(voters.map(async agent => {
+      const done = await runTurn({
+        agent, room, roster, deliberation: d, round,
+        history: afterChair, steers, sealed: false, signal,
+        extraInstruction: agent.id === devil.id ? DEVIL_INSTRUCTION : endorseInstruction(),
+      })
+      if (done === true) settled.add(agent.id)
+    }))
     if (signal.aborted) {
       const next = restart(round)
       if (!next) break
+      resume = { round, chairDone: true, rest: new Set(voters.filter(a => !settled.has(a.id)).map(a => a.id)) }
+      deferSteers = true
       signal = next; round -= 1; continue
     }
-    hooks.markSteersConsumed?.(steers)
+    // An interrupt's steer stays pending through the next round, so the agents
+    // whose turns were kept see it too.
+    if (deferSteers) deferSteers = false
+    else hooks.markSteersConsumed?.(steers)
 
     const check = tally(d.roomId, roster, d.id)
     outcome = { ...check, rounds: round }
