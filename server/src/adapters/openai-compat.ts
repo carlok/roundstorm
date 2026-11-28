@@ -18,7 +18,13 @@ export interface CompatSpec {
   staticModels?: { id: string; label: string }[]
   /** Local endpoints answer /v1/models without auth, so availability is testable. */
   probe?: boolean
+  /** Abandon one request after this long. The turn deadline still applies on top. */
   timeoutMs?: number
+  /**
+   * Output budget per request. Reasoning models count their hidden reasoning
+   * against it, so 4000 could cut a deepseek-reasoner turn off mid-answer.
+   */
+  maxTokens?: number
   /**
    * How this server wants structured output. Not cosmetic: LM Studio rejects
    * `json_object` outright ("must be 'json_schema' or 'text'"), while DeepSeek
@@ -87,6 +93,33 @@ export function makeCompatAdapter(spec: CompatSpec): BrainAdapter {
   }
 }
 
+const MAX_RETRIES = 2
+const RETRYABLE = new Set([408, 429, 500, 502, 503, 504])
+
+/**
+ * How long to wait before retry `attempt` (0-based): the server's Retry-After
+ * (seconds or an HTTP date) when it gives one, else 1 s, 2 s, ... Capped at 20 s,
+ * so a server asking for minutes does not hold a round hostage.
+ */
+export function retryDelay(retryAfter: string | null, attempt: number, now = Date.now()): number {
+  if (retryAfter) {
+    const secs = Number(retryAfter)
+    const ms = Number.isFinite(secs) ? secs * 1000 : Date.parse(retryAfter) - now
+    if (Number.isFinite(ms) && ms >= 0) return Math.min(ms, 20_000)
+  }
+  return Math.min(1000 * 2 ** attempt, 20_000)
+}
+
+/** Resolves true after `ms`, or false as soon as `signal` aborts. */
+function sleep(ms: number, signal: AbortSignal): Promise<boolean> {
+  return new Promise(resolve => {
+    if (signal.aborted) return resolve(false)
+    const t = setTimeout(() => { signal.removeEventListener('abort', onAbort); resolve(true) }, ms)
+    const onAbort = () => { clearTimeout(t); resolve(false) }
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
 function responseFormat(spec: CompatSpec, schema: unknown) {
   if (spec.responseFormat === 'text') return undefined
   if (spec.responseFormat === 'json_object') return { type: 'json_object' }
@@ -117,35 +150,52 @@ async function* runCompat(
 Reply with a single JSON object matching this schema, and nothing else:
 ${JSON.stringify(req.schema)}`
 
-  let res: Response
-  try {
-    res = await fetch(`${spec.baseUrl}/chat/completions`, {
-      method: 'POST',
-      signal,
-      headers,
-      body: JSON.stringify({
-        // `||`: an agent with no model chosen stores '' and sent it verbatim.
-        model: req.model || spec.staticModels?.[0]?.id,
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: req.userPrompt },
-        ],
-        response_format: responseFormat(spec, req.schema),
-        max_tokens: 4000,
-      }),
-    })
-  } catch (err) {
-    const aborted = signal.aborted
-    yield { type: 'error', message: aborted ? 'cancelled' : `${spec.id} request failed: ${String(err)}` }
+  const request = JSON.stringify({
+    // `||`: an agent with no model chosen stores '' and sent it verbatim.
+    model: req.model || spec.staticModels?.[0]?.id,
+    messages: [
+      { role: 'system', content: system },
+      { role: 'user', content: req.userPrompt },
+    ],
+    response_format: responseFormat(spec, req.schema),
+    max_tokens: spec.maxTokens ?? 4000,
+  })
+
+  // A 429 or a 5xx used to drop the agent for the whole round. Two more tries,
+  // waiting what the server asks for (Retry-After) or backing off, and never
+  // past an abort.
+  let res: Response | null = null
+  for (let attempt = 0; ; attempt++) {
+    const perRequest = spec.timeoutMs ? AbortSignal.any([signal, AbortSignal.timeout(spec.timeoutMs)]) : signal
+    try {
+      res = await fetch(`${spec.baseUrl}/chat/completions`, { method: 'POST', signal: perRequest, headers, body: request })
+    } catch (err) {
+      if (signal.aborted) { yield { type: 'error', message: 'cancelled' }; return }
+      if (attempt >= MAX_RETRIES) {
+        const timedOut = !!spec.timeoutMs && perRequest.aborted
+        yield { type: 'error', message: timedOut
+          ? `${spec.id} did not answer within ${Math.round(spec.timeoutMs! / 1000)}s`
+          : `${spec.id} request failed: ${String(err)}` }
+        return
+      }
+      res = null
+    }
+    if (res && !RETRYABLE.has(res.status)) break
+    if (attempt >= MAX_RETRIES) break
+    const wait = retryDelay(res?.headers.get('retry-after') ?? null, attempt)
+    // Release the failed response's body so its connection can be reused.
+    await res?.body?.cancel().catch(() => {})
+    yield { type: 'activity', text: `${res ? `${spec.id} ${res.status}` : 'Connection failed'}, retrying in ${Math.ceil(wait / 1000)}s` }
+    if (!await sleep(wait, signal)) { yield { type: 'error', message: 'cancelled' }; return }
+  }
+  const response = res!
+
+  if (!response.ok) {
+    yield { type: 'error', message: `${spec.id} ${response.status}: ${(await response.text()).slice(0, 300)}` }
     return
   }
 
-  if (!res.ok) {
-    yield { type: 'error', message: `${spec.id} ${res.status}: ${(await res.text()).slice(0, 300)}` }
-    return
-  }
-
-  const body = await res.json() as any
+  const body = await response.json() as any
   const text: string = body?.choices?.[0]?.message?.content ?? ''
   if (!text.trim()) {
     yield { type: 'error', message: `${spec.id} returned no content` }
@@ -165,6 +215,7 @@ export const deepseekAdapter = makeCompatAdapter({
   apiKeyEnv: 'DEEPSEEK_API_KEY',
   note: 'HTTP API, your own key. Set DEEPSEEK_API_KEY.',
   responseFormat: 'json_object',
+  maxTokens: 8000,
   staticModels: [
     { id: 'deepseek-chat', label: 'DeepSeek Chat' },
     { id: 'deepseek-reasoner', label: 'DeepSeek Reasoner' },

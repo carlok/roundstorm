@@ -78,3 +78,18 @@ test('the tiers below workstation get no file tools from claude', () => {
 test('the reasoning tier gets no tools whatsoever, as the manual says', () => {
   assert.deepEqual([...claudeToolsFor('reasoning')], [])
 })
+
+// --- codex tools (#93) ---
+
+test('codex has no shell below Workstation, and never desktop or browser tools', async () => {
+  const { codexDisabledFor } = await import('./codex.ts')
+  for (const t of ['reasoning', 'research', ...NOT_TIERS]) {
+    const off = codexDisabledFor(t)
+    assert.ok(off.includes('shell_tool') && off.includes('unified_exec'), `tier ${JSON.stringify(t)} kept a shell`)
+  }
+  for (const t of ['workstation', 'full']) {
+    const off = codexDisabledFor(t)
+    assert.ok(!off.includes('shell_tool'), `${t} lost the shell it is meant to have`)
+    for (const f of ['computer_use', 'browser_use', 'in_app_browser', 'apps']) assert.ok(off.includes(f), `${t} kept ${f}`)
+  }
+})

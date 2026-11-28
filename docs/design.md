@@ -424,14 +424,16 @@ Tier → flag mapping, verified:
 
 | Tier | `claude` | `agy` | `codex exec` | `cursor-agent` |
 |---|---|---|---|---|
-| Reasoning only | `--tools ''` | `--sandbox`, no `--add-dir` | `-s read-only` + no workspace | `--mode ask --sandbox enabled` |
-| Research | allow web tools only | `--sandbox` | `-s read-only` | `--mode ask --sandbox enabled` |
+| Reasoning only | `--tools ''` | `--sandbox`, no `--add-dir` | `-s read-only` + no workspace + `--disable shell_tool --disable unified_exec` | `--mode ask --sandbox enabled` |
+| Research | allow web tools only | `--sandbox` | `-s read-only` + shell tools disabled | `--mode ask --sandbox enabled` |
 | Workstation (read-only) | `--add-dir <wd>`, read tools | `--add-dir <wd>`, `--mode plan` | `-C <wd> -s read-only` | `--mode plan --workspace <wd>` |
 | Full local | `--add-dir <wd>` + write tools | `--add-dir <wd>`, `--mode accept-edits` | `-C <wd> -s workspace-write` | `--workspace <wd> --sandbox enabled -f` |
 
 `cursor-agent` is the coarsest of the four: `--print` grants all tools including write and bash, and the read-only guarantee rests on `--mode plan|ask` rather than a kernel sandbox. Treat its Reasoning-only and Research tiers as *advisory*, mark them as such in the UI, and never hand it a working directory containing anything you would mind it touching.
 
-The mapping above fails closed: a tier string the adapter does not recognise gets `--mode ask` (cursor), `--sandbox` (agy), `read-only` (codex) and no tools at all (claude). It did not always — cursor and agy tested for the *restrictive* tiers and let everything else through, so an unvalidated `tierCeiling` reaching them meant write and shell.
+At every tier codex also gets `--disable` for `computer_use`, `browser_use`, `in_app_browser` and `apps`. The read-only sandbox on its own did not make Reasoning tool-less: checked against codex-cli 0.149, an agent at that tier ran a shell command and reported its output.
+
+The mapping above fails closed: a tier string the adapter does not recognise gets `--mode ask` (cursor), `--sandbox` (agy), `read-only` plus no shell (codex) and no tools at all (claude). It did not always — cursor and agy tested for the *restrictive* tiers and let everything else through, so an unvalidated `tierCeiling` reaching them meant write and shell.
 
 `--dangerously-skip-permissions` / `--dangerously-bypass-approvals-and-sandbox` are never used. If a brain cannot express a tier, the agent is shown as capped at the highest tier it *can* honor — silently over-granting is the one failure mode that must not exist.
 
