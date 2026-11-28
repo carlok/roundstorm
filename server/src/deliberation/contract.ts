@@ -125,7 +125,6 @@ Write your message in Markdown. Then end with one fenced JSON block describing i
 \`\`\`
 
 Do not repeat your message inside the block. Leave "memory" empty unless this is the final round.
-Mark a claim "sourced" only if you actually retrieved the source in this session.
 `.trim()
 
 export interface RawPositionOp {

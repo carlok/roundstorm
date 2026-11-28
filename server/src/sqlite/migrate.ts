@@ -31,6 +31,9 @@ const hasColumn = (db: SqliteDatabase, table: string, column: string): boolean =
   (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[])
     .some(c => c.name === column)
 
+const hasIndex = (db: SqliteDatabase, name: string): boolean =>
+  !!db.prepare(`SELECT 1 FROM sqlite_master WHERE type='index' AND name=?`).get(name)
+
 export const MIGRATIONS: Migration[] = [
   {
     version: 1,
@@ -47,6 +50,17 @@ export const MIGRATIONS: Migration[] = [
                ) WHERE message_id IS NOT NULL`)
       db.exec(`CREATE INDEX IF NOT EXISTS idx_ops_position_delib
                ON position_ops(position_id, deliberation_id, id)`)
+    },
+  },
+  {
+    version: 2,
+    name: 'messages.seq index',
+    // Every insert takes MAX(seq) over the whole table; the only index was
+    // (room_id, seq), which cannot answer a global maximum, so each insert
+    // scanned every message ever written.
+    needed: db => hasColumn(db, 'messages', 'seq') && !hasIndex(db, 'idx_messages_seq'),
+    up: db => {
+      db.exec('CREATE INDEX IF NOT EXISTS idx_messages_seq ON messages(seq)')
     },
   },
 ]

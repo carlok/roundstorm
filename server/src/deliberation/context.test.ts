@@ -273,3 +273,21 @@ test('an adapter that writes its own output format does not also get the prompte
   assert.doesNotMatch(composeContext({ ...base, ownContract: true }).systemPrompt, /## Output format/,
     'two contradictory output instructions in one prompt')
 })
+
+// --- prompt hygiene (#85) ---
+
+test('the "sourced" rule is stated once per prompt, whatever the brain', () => {
+  for (const schemaEnforced of [true, false]) {
+    const ctx = composeContext({ agent: roster[0], room, roster, deliberation: delib({ currentRound: 2 }),
+      round: 2, history: [], steers: [], schemaEnforced })
+    const both = ctx.systemPrompt + '\n' + ctx.userPrompt
+    assert.equal(both.match(/only if you (actually )?retrieved/g)?.length ?? 0, 1, `schemaEnforced=${schemaEnforced}`)
+  }
+})
+
+test('a conclave role instruction is not followed by the generic position_ops paragraph', () => {
+  const ctx = composeContext({ agent: roster[0], room, roster, deliberation: delib({ mode: 'conclave', currentRound: 2 }),
+    round: 2, history: [], steers: [], schemaEnforced: true, extraInstruction: 'You hold the chair this round.' })
+  assert.ok(!/Before opening a new position, read the ledger above/.test(ctx.userPrompt),
+    'the generic paragraph contradicts the role instruction')
+})

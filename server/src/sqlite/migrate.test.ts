@@ -121,3 +121,16 @@ test('the real schema reaches the latest version at import', async () => {
   assert.equal(db.schemaVersion.to, MIGRATIONS[MIGRATIONS.length - 1].version)
   assert.ok(columns(db.db, 'position_ops').includes('deliberation_id'))
 })
+
+test('a database with messages.seq gets the seq index, once', () => {
+  // Every insert takes MAX(seq); without this index that scanned every message.
+  const db = openDatabase(join(mkdtempSync(join(tmpdir(), 'rs-migrate-seq-')), 'old.db'))
+  db.exec(OLD_SCHEMA)
+  db.exec('ALTER TABLE messages ADD COLUMN seq INTEGER')
+  const r = migrate(db)
+  assert.ok(r.applied.some(n => /seq/.test(n)), 'the index migration did not run')
+  const plan = (db.prepare('EXPLAIN QUERY PLAN SELECT MAX(seq) FROM messages').all() as { detail: string }[])
+    .map(p => p.detail).join(' ')
+  assert.match(plan, /idx_messages_seq/)
+  assert.deepEqual(migrate(db).applied, [])
+})
