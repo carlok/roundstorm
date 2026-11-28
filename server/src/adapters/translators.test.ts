@@ -113,3 +113,15 @@ test('agy: no response at all reports why', () => {
     [{ type: 'error', message: 'CANCELLED' }])
   assert.deepEqual(run(agyTranslator(), [], 3), [{ type: 'error', message: 'agy exited 3' }])
 })
+
+// --- codex schema file (#82) ---
+
+test('codex schema files are named by content, so two schemas never share a path', async () => {
+  const { writeSchema } = await import('./codex.ts')
+  const { readFileSync } = await import('node:fs')
+  const a = writeSchema({ type: 'object', title: 'turn' })
+  const b = writeSchema({ type: 'object', title: 'result' })
+  assert.notEqual(a, b, 'a synthesis and a turn would overwrite each other')
+  assert.equal(writeSchema({ type: 'object', title: 'turn' }), a)
+  assert.deepEqual(JSON.parse(readFileSync(b, 'utf8')), { type: 'object', title: 'result' })
+})

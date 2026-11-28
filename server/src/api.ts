@@ -279,17 +279,24 @@ export function makeApi() {
     if (!name || !Array.isArray(memberIds) || !memberIds.length) {
       return res.status(400).json({ error: 'name and memberIds required' })
     }
-    const child = db.createRoom(parent.projectId, name, 'room', memberIds, parent.tier)
-    const seeds = (messageIds as string[]).map(id => db.getMessage(id)).filter(Boolean)
-    if (seeds.length) {
-      const agentName = (id: string | null) => db.getAgent(id ?? '')?.name ?? 'Human'
-      db.insertMessage({
-        roomId: child.id, authorType: 'system',
-        body: `Taken from **${parent.name}**:\n\n` + seeds
-          .map(m => `> **${agentName(m!.authorId)}**: ${m!.body.trim().slice(0, 1200)}`)
-          .join('\n>\n'),
-      })
-    }
+    const bad = memberCheck(memberIds)
+    if (bad) return res.status(400).json({ error: bad })
+    const seeds = (Array.isArray(messageIds) ? messageIds as string[] : [])
+      .map(id => db.getMessage(id)).filter(Boolean)
+    // The room and its seed message land together, or not at all.
+    const child = db.tx(() => {
+      const room = db.createRoom(parent.projectId, name, 'room', memberIds, parent.tier)
+      if (seeds.length) {
+        const agentName = (id: string | null) => db.getAgent(id ?? '')?.name ?? 'Human'
+        db.insertMessage({
+          roomId: room.id, authorType: 'system',
+          body: `Taken from **${parent.name}**:\n\n` + seeds
+            .map(m => `> **${agentName(m!.authorId)}**: ${m!.body.trim().slice(0, 1200)}`)
+            .join('\n>\n'),
+        })
+      }
+      return room
+    })
     db.logEvent('room.forked', { roomId: parent.id, payload: { child: child.id, seeds: seeds.length } })
     res.json(child)
   })
@@ -317,6 +324,9 @@ export function makeApi() {
     const { projectId, name, kind = 'room', memberIds = [], tier = 'research' } = req.body ?? {}
     if (!projectId || !name) return res.status(400).json({ error: 'projectId and name required' })
     if (!isTier(tier)) return res.status(400).json({ error: `tier ${tierError.error}` })
+    if (!db.getProject(projectId)) return res.status(400).json({ error: 'no such project' })
+    const bad = memberCheck(memberIds)
+    if (bad) return res.status(400).json({ error: bad })
     res.json(db.createRoom(projectId, name, kind, memberIds, tier))
   })
 
@@ -326,6 +336,10 @@ export function makeApi() {
     if (tier !== undefined) {
       if (!isTier(tier)) return res.status(400).json({ error: `tier ${tierError.error}` })
       db.setRoomTier(req.params.id, tier)
+    }
+    if (memberIds !== undefined) {
+      const bad = memberCheck(memberIds)
+      if (bad) return res.status(400).json({ error: bad })
     }
     if (typeof name === 'string' && name.trim()) db.renameRoom(req.params.id, name.trim())
     if (Array.isArray(memberIds)) db.setRoomMembers(req.params.id, memberIds)
@@ -542,7 +556,13 @@ export function makeApi() {
   api.post('/deliberations/:id/extend', (req, res) => {
     const by = roundsOrNull(req.body?.by ?? 1)
     if (by === null) return res.status(400).json({ error: 'by must be a whole number from 1 to 20' })
-    if (!db.getDeliberation(req.params.id)) return res.status(404).json({ error: 'no such deliberation' })
+    const d = db.getDeliberation(req.params.id)
+    if (!d) return res.status(404).json({ error: 'no such deliberation' })
+    // Extending a run that has ended (or is synthesising) used to bump `rounds`
+    // and answer 200 while nothing ran.
+    if (d.status !== 'running') {
+      return res.status(409).json({ error: `this deliberation is ${d.status}; start a new one to continue` })
+    }
     extendDeliberation(req.params.id, by)
     res.json(db.getDeliberation(req.params.id))
   })
@@ -601,6 +621,15 @@ function roundsOrNull(v: unknown): number | null {
 }
 
 /** The deliberation a room's headline should be about: the live one, else the last. */
+/** Why a member list cannot be written, or null when it can. Checked before any write. */
+function memberCheck(memberIds: unknown): string | null {
+  if (!Array.isArray(memberIds) || !memberIds.every(m => typeof m === 'string')) {
+    return 'memberIds must be a list of agent ids'
+  }
+  const unknown = db.unknownAgents(memberIds)
+  return unknown.length ? `no such agent: ${unknown.join(', ')}` : null
+}
+
 function currentRun(roomId: string): string | undefined {
   const active = db.activeDeliberation(roomId)
   if (active) return active.id

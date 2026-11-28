@@ -241,3 +241,43 @@ test('the ledger route returns the run summary, and 404s for a room that does no
   assert.equal(body.level, 'no_reliable_conclusion')
   assert.equal((await fetch(`${origin}/api/rooms/nope/ledger`)).status, 404)
 })
+
+// --- run integrity (#80, #81) ---
+
+test('extending a deliberation that has ended is a 409, not a silent 200', async () => {
+  const r = room('ended-room')
+  const d = db.createDeliberation({
+    roomId: r.id, mode: 'deliberation', rounds: 2, style: 'parallel', sealedOpening: false,
+    status: 'complete', currentRound: 2, question: 'q', tier: 'reasoning',
+  } as never)
+  const res = await post(`/api/deliberations/${d.id}/extend`, { by: 1 })
+  assert.equal(res.status, 409)
+  assert.equal(db.getDeliberation(d.id)!.rounds, 2, 'rounds were bumped anyway')
+})
+
+test('an unknown member id is refused before anything is written', async () => {
+  const r = room('cast-room')
+  const before = db.listRooms().length
+  const created = await post('/api/rooms', { projectId: r.projectId, name: 'bad cast', memberIds: [r.memberIds[0], 'ghost'] })
+  assert.equal(created.status, 400)
+  assert.match((await created.json()).error, /ghost/)
+  assert.equal(db.listRooms().length, before, 'a half-made room was left behind')
+
+  const edited = await patch(`/api/rooms/${r.id}`, { memberIds: ['ghost'] })
+  assert.equal(edited.status, 400)
+  assert.deepEqual(db.getRoom(r.id)!.memberIds, r.memberIds, 'the cast was emptied by a bad edit')
+
+  const fork = await post(`/api/rooms/${r.id}/fork`, { name: 'side', memberIds: ['ghost'] })
+  assert.equal(fork.status, 400)
+  assert.equal(db.listRooms().length, before)
+})
+
+test('a transaction lands all of its writes or none of them', () => {
+  const p = db.createProject('tx')
+  assert.throws(() => db.tx(() => {
+    db.createRoom(p.id, 'tx-room', 'room', [])
+    throw new Error('boom')
+  }), /boom/)
+  assert.ok(!db.listRooms().some(r => r.name === 'tx-room'), 'a write survived the rollback')
+  assert.equal(db.tx(() => db.createRoom(p.id, 'tx-ok', 'room', []).name), 'tx-ok')
+})
