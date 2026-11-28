@@ -9,9 +9,10 @@ import { Markdown } from './Markdown.tsx'
  * "conclave failed" are first-class outcomes here, styled as results rather
  * than as errors — an unresolved disagreement is a legitimate research finding.
  */
-export function ResultCardView({ card, onCopy, onSynthesise }: {
+export function ResultCardView({ card, onCopy, onCopyJson, onSynthesise }: {
   card: ResultCard
   onCopy: (c: ResultCard) => void
+  onCopyJson?: (c: ResultCard) => void
   /** Ask for a real synthesis of a card no synthesiser wrote (after a Stop). */
   onSynthesise?: (c: ResultCard) => Promise<boolean>
 }) {
@@ -55,6 +56,7 @@ export function ResultCardView({ card, onCopy, onSynthesise }: {
           )}
           <div className="result-actions">
             <button onClick={() => onCopy(card)}>Copy as Markdown</button>
+            {onCopyJson && <button onClick={() => onCopyJson(card)}>Copy as JSON</button>}
           </div>
         </div>
       )}

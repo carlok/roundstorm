@@ -228,7 +228,14 @@ function renderSources(roomId: string): string {
   if (!sources.length) return ''
   return ['# Sources gathered in this room',
     'Cite these by label in your claims.', '',
-    ...sources.map(s => `- **${s.label}** ${s.title}${s.url ? ` — ${s.url}` : ''}`)].join('\n')
+    ...sources.flatMap(s => {
+      const line = `- **${s.label}** ${s.title}${s.url ? ` — ${s.url}` : ''}`
+      // Text the researcher pasted in is the evidence itself: without it the
+      // agents saw only a title. Agents' own sources stay one line each.
+      if (s.foundBy || !s.snapshot) return [line]
+      const excerpt = s.snapshot.length > 1500 ? `${s.snapshot.slice(0, 1500)}…` : s.snapshot
+      return [line, ...excerpt.split('\n').map(l => `  > ${l}`)]
+    })].join('\n')
 }
 
 /**
