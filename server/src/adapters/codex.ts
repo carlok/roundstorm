@@ -38,6 +38,21 @@ const SANDBOX: Record<Tier, string> = {
 export const codexSandboxFor = (tier: string): string =>
   isTier(tier) ? SANDBOX[tier] : 'read-only'
 
+/**
+ * Codex tools to switch off, per tier.
+ *
+ * The sandbox alone does not make a tier tool-less: `read-only` still lets the
+ * model run read-only commands, which can read any file the user can. Checked
+ * against codex-cli 0.149: at the Reasoning tier an agent ran `echo` and
+ * reported its output. So below Workstation the shell tools are disabled
+ * outright, and at every tier the desktop, browser and connector tools are,
+ * because no Roundstorm tier grants those. An unknown tier gets the strictest set.
+ */
+const NEVER = ['computer_use', 'browser_use', 'in_app_browser', 'apps']
+const NO_SHELL = ['shell_tool', 'unified_exec']
+export const codexDisabledFor = (tier: string): string[] =>
+  isTier(tier) && (tier === 'workstation' || tier === 'full') ? NEVER : [...NO_SHELL, ...NEVER]
+
 
 /** A CODEX_HOME with no skills, no rules, no config — but the real credentials. */
 function isolatedHome(): string {
@@ -106,6 +121,7 @@ function runCodex(req: TurnRequest, signal: AbortSignal): AsyncIterable<AdapterE
     '--skip-git-repo-check',
     '--ephemeral',
     '--output-schema', schemaPath,
+    ...codexDisabledFor(req.tier).flatMap(f => ['--disable', f]),
   ]
   if (req.model) args.push('--model', req.model)
   if (req.workingDir) args.push('--cd', req.workingDir)

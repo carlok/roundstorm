@@ -65,13 +65,57 @@ export async function embedderStatus(): Promise<EmbedderStatus> {
   }
 }
 
+// Reachability is probed at most every 15 s per endpoint. De-duplication asked
+// before every new-title op, so a ten-agent round paid ten probes, queued one
+// behind another on the room's ledger.
+let probed: { url: string; at: number; ok: boolean } | null = null
+const PROBE_TTL_MS = 15_000
+
 async function reachable(): Promise<boolean> {
+  const url = baseUrl()
+  if (probed && probed.url === url && Date.now() - probed.at < PROBE_TTL_MS) return probed.ok
+  let ok = false
   try {
-    const res = await fetch(`${baseUrl()}/models`, { signal: AbortSignal.timeout(2000) })
-    return res.ok
+    const res = await fetch(`${url}/models`, { signal: AbortSignal.timeout(2000) })
+    ok = res.ok
   } catch {
-    return false
+    ok = false
   }
+  probed = { url, at: Date.now(), ok }
+  return ok
+}
+
+/**
+ * Vectors for short texts, remembered per endpoint and model. A position's text
+ * rarely changes, but every new-title op re-embedded every position in the room:
+ * O(P) embeddings per op, O(P²) per run. Now only texts not seen before are sent.
+ * Bounded, oldest first out.
+ */
+const vectorCache = new Map<string, Float32Array>()
+const VECTOR_CACHE_MAX = 2_000
+
+async function embedCached(texts: string[]): Promise<Float32Array[]> {
+  const keyOf = (t: string) => `${baseUrl()}\u0000${embedModel()}\u0000${t}`
+  const missing = [...new Set(texts.filter(t => !vectorCache.has(keyOf(t))))]
+  for (let i = 0; i < missing.length; i += 16) {
+    const batch = missing.slice(i, i + 16)
+    const vecs = await embed(batch)
+    batch.forEach((t, j) => { if (vecs[j]) vectorCache.set(keyOf(t), vecs[j]) })
+  }
+  while (vectorCache.size > VECTOR_CACHE_MAX) vectorCache.delete(vectorCache.keys().next().value!)
+  return texts.map(t => {
+    const k = keyOf(t)
+    const v = vectorCache.get(k)
+    // Re-insert on use, so the eviction above drops the least recently used.
+    if (v) { vectorCache.delete(k); vectorCache.set(k, v) }
+    return v as Float32Array
+  })
+}
+
+/** For tests: forget probes and vectors. */
+export function resetEmbeddingCachesForTest() {
+  probed = null
+  vectorCache.clear()
 }
 
 async function embed(texts: string[]): Promise<Float32Array[]> {
@@ -250,7 +294,7 @@ export async function nearest(
   if (!candidates.length) return { hit: null, available: true }
   if (!await reachable()) return { hit: null, available: false }
   try {
-    const vecs = await embed([truncate(query), ...candidates.map(c => truncate(c.text))])
+    const vecs = await embedCached([truncate(query), ...candidates.map(c => truncate(c.text))])
     const qv = vecs[0]
     if (!qv) return { hit: null, available: false }
     let best: { id: string; score: number } | null = null

@@ -16,16 +16,19 @@ process.env.ROUNDSTORM_DATA = mkdtempSync(join(tmpdir(), 'rs-embidx-'))
 
 let server: Server
 const asked: string[] = []
+const inputs: number[] = []
+let probes = 0
 const vecFor = (t: string) => [/bearing/i.test(t) ? 1 : 0, /pump/i.test(t) ? 1 : 0, 0.1]
 
 before(async () => {
   server = createServer((req, res) => {
-    if (req.url?.endsWith('/models')) { res.end('{"data":[]}'); return }
+    if (req.url?.endsWith('/models')) { probes++; res.end('{"data":[]}'); return }
     let body = ''
     req.on('data', d => { body += d })
     req.on('end', () => {
       const { model, input } = JSON.parse(body)
       asked.push(model)
+      inputs.push(input.length)
       res.setHeader('content-type', 'application/json')
       res.end(JSON.stringify({ data: input.map((t: string, index: number) => ({ index, embedding: vecFor(t) })) }))
     })
@@ -37,7 +40,7 @@ before(async () => {
 after(() => { server.close() })
 
 const db = await import('../db.ts')
-const { indexPending, semanticSearch, embedderStatus } = await import('./embeddings.ts')
+const { indexPending, semanticSearch, embedderStatus, nearest, resetEmbeddingCachesForTest } = await import('./embeddings.ts')
 
 const project = db.createProject('Emb')
 const agent = db.createAgent({
@@ -94,4 +97,21 @@ test('changing the embedding model re-embeds instead of mixing two vector spaces
   assert.ok(asked.every(m => m === 'model-b'))
   assert.equal((await embedderStatus()).pending, 0)
   assert.equal((await semanticSearch('bearing', 10))!.length, 3)
+})
+
+test('de-duplication embeds each position once, and probes the embedder once', async () => {
+  // Every new-title op used to re-embed the query plus every position, and probe
+  // reachability first: O(P) embeddings per op, O(P²) per deliberation.
+  resetEmbeddingCachesForTest()
+  probes = 0
+  inputs.length = 0
+  const positions = Array.from({ length: 20 }, (_, i) => ({ id: `p${i}`, text: `position about pumps number ${i}` }))
+  const first = await nearest('a bearing that is worn', positions, 0.7)
+  assert.equal(first.available, true)
+  assert.equal(inputs.reduce((a, b) => a + b, 0), 21, 'first call should embed the query and the 20 positions')
+  assert.ok(inputs.every(n => n <= 16), 'batches should stay small')
+  inputs.length = 0
+  await nearest('a different worn bearing', positions, 0.7)
+  assert.deepEqual(inputs, [1], 'the positions were embedded again')
+  assert.equal(probes, 1, 'reachability was probed on every call')
 })
