@@ -355,3 +355,15 @@ test('bootstrap lists the rooms with a run in progress', async () => {
   assert.ok(boot.running.includes(r.id))
   assert.ok(!boot.running.includes(room('idle-room').id))
 })
+
+test('the synthesise route answers 404 and 409 rather than starting nonsense', async () => {
+  assert.equal((await post('/api/deliberations/nope/synthesise', {})).status, 404)
+  const r = room('synth-route')
+  const d = db.createDeliberation({
+    roomId: r.id, mode: 'deliberation', rounds: 2, style: 'parallel', sealedOpening: false,
+    status: 'running', currentRound: 1, question: 'q', tier: 'reasoning',
+  } as never)
+  const res = await post(`/api/deliberations/${d.id}/synthesise`, {})
+  assert.equal(res.status, 409)
+  assert.match((await res.json()).error, /still running/)
+})

@@ -9,8 +9,14 @@ import { Markdown } from './Markdown.tsx'
  * "conclave failed" are first-class outcomes here, styled as results rather
  * than as errors — an unresolved disagreement is a legitimate research finding.
  */
-export function ResultCardView({ card, onCopy }: { card: ResultCard; onCopy: (c: ResultCard) => void }) {
+export function ResultCardView({ card, onCopy, onSynthesise }: {
+  card: ResultCard
+  onCopy: (c: ResultCard) => void
+  /** Ask for a real synthesis of a card no synthesiser wrote (after a Stop). */
+  onSynthesise?: (c: ResultCard) => Promise<boolean>
+}) {
   const [open, setOpen] = useState(true)
+  const [asked, setAsked] = useState(false)
   const tone = card.level === 'conclave_failed' ? 'warn'
     : card.level === 'strong_consensus' || card.level === 'conclave_reached' ? 'good' : 'neutral'
 
@@ -38,6 +44,15 @@ export function ResultCardView({ card, onCopy }: { card: ResultCard; onCopy: (c:
           <List title="Unknowns" items={card.unknowns} />
           <List title="Recommended next steps" items={card.nextSteps} />
 
+          {card.narrated === false && onSynthesise && (
+            <p className="result-unnarrated">
+              Nobody summarised this run, so the card holds only the leading position.{' '}
+              <button className="linkish" disabled={asked}
+                      onClick={() => { setAsked(true); void onSynthesise(card).then(ok => { if (!ok) setAsked(false) }) }}>
+                {asked ? 'Synthesising…' : 'Synthesise what was said'}
+              </button>
+            </p>
+          )}
           <div className="result-actions">
             <button onClick={() => onCopy(card)}>Copy as Markdown</button>
           </div>

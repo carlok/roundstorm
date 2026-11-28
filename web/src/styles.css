@@ -494,6 +494,7 @@ button.danger { color: var(--danger); }
 .result-level { font-weight: 600; font-size: 14px; }
 .result-toggle { margin-left: auto; color: var(--fg-faint); }
 .result-body { padding: 0 14px 14px; }
+.result-unnarrated { font-size: 12.5px; color: var(--fg-dim); margin: 0 0 10px; }
 .result-fail {
   background: color-mix(in srgb, #d68c3f 16%, transparent);
   border-radius: 7px; padding: 8px 10px; font-size: 13px; margin: 0 0 12px;

@@ -217,6 +217,12 @@ export interface ResultCard {
   /** Conclave only. */
   proposalVersion?: number
   failureReason?: string
+  /**
+   * False when no synthesiser wrote this card (it was stopped, timed out or had
+   * no brain), so it holds only the ledger's leading title. The UI offers to
+   * synthesise it then. Absent on cards from before this field existed.
+   */
+  narrated?: boolean
 }
 
 export interface MemoryCard {

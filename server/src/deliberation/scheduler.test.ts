@@ -22,7 +22,7 @@ const db = await import('../db.ts')
 const { registerAdapter } = await import('../adapters/registry.ts')
 const { makeStubBrain } = await import('../adapters/stub.ts')
 type StubOptions = Parameters<typeof makeStubBrain>[0]
-const { startDeliberation, stopDeliberation, interruptDeliberation, mentions, parseTurnTimeout } =
+const { startDeliberation, stopDeliberation, interruptDeliberation, mentions, parseTurnTimeout, resynthesise } =
   await import('./scheduler.ts')
 const { synthesise } = await import('./synthesis.ts')
 
@@ -467,4 +467,43 @@ test('a conclave keeps only the memory proposed in the round it ended on', async
   assert.ok(cards.length > 0, 'no proposals at all')
   assert.deepEqual([...new Set(cards.map(c => msgs.get(c.sourceMessageId!)?.round))], [4],
     'proposals from earlier conclave rounds survived')
+})
+
+// --- synthesise after Stop (#98) ---
+
+test('a stopped run gets a card marked unwritten, and can be synthesised in place', async () => {
+  const { room: r, stubs, cleanup } = room(['A'], () => ({ delayMs: 150, turn: synthOrTurn }))
+  const d = deliberation(r.id, { rounds: 3 })
+  const run = startDeliberation(d)
+  setTimeout(() => stopDeliberation(d.id), 250)
+  await run
+
+  const cardOf = () => db.listResults(r.id).filter(c => c.deliberationId === d.id)
+  const before = cardOf()
+  assert.equal(before.length, 1)
+  assert.equal(before[0].narrated, false, 'a card nobody wrote was not marked as such')
+  assert.match(before[0].failureReason ?? '', /Stopped during round \d of 3/)
+
+  assert.equal(resynthesise(d.id), 'started')
+  assert.equal(resynthesise(d.id), 'in-progress', 'a second request started a second synthesis')
+  for (let i = 0; i < 100 && cardOf()[0].narrated !== true; i++) await new Promise(res => setTimeout(res, 20))
+  cleanup()
+
+  const after = cardOf()
+  assert.equal(after.length, 1, 'the card was duplicated instead of rewritten')
+  assert.equal(after[0].id, before[0].id)
+  assert.equal(after[0].why, 'SYNTH-WHY')
+  const pointers = db.listMessages(r.id).filter(m => m.deliberationId === d.id && m.body.startsWith('__result__:'))
+  assert.equal(pointers.length, 1, 'a second result card appeared in the transcript')
+  const prompt = stubs.get('A')!.calls.filter(rapporteur).at(-1)!.userPrompt
+  assert.match(prompt, /stopped this run during round \d of 3/)
+  assert.equal(resynthesise(d.id), 'already-synthesised')
+})
+
+test('synthesis on demand refuses a running or unknown deliberation', () => {
+  const { room: r, cleanup } = room(['A'])
+  const d = deliberation(r.id, { rounds: 2 })
+  assert.equal(resynthesise(d.id), 'still-running', 'a running deliberation is synthesised at its end')
+  assert.equal(resynthesise('nope'), 'no-such-deliberation')
+  cleanup()
 })
