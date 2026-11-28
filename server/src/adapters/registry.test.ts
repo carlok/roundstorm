@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { schemaFor } from './registry.ts'
+import { adapterIds, BRAIN_CACHE_MS, probeBrains, registerAdapter, schemaFor } from './registry.ts'
 import { TURN_SCHEMA } from '../deliberation/contract.ts'
 import type { BrainAdapter } from './types.ts'
 
@@ -9,6 +9,31 @@ const fake = (over: Partial<BrainAdapter>): BrainAdapter => ({
   available: async () => true, listModels: async () => [],
   run: () => { throw new Error('unused') },
   ...over,
+})
+
+test('the brain list is cached until the expiry boundary', async (t) => {
+  const ids = adapterIds()
+  const primary = ids[0]!
+  let probes = 0
+  const restore = ids.map(id => registerAdapter(fake({
+    id,
+    available: async () => id === primary,
+    listModels: async () => {
+      probes += 1
+      return [{ id: `model-${probes}`, label: `Model ${probes}` }]
+    },
+  })))
+  t.after(() => restore.reverse().forEach(undo => undo()))
+
+  const first = await probeBrains(false, 1000)
+  const cached = await probeBrains(false, 1000 + BRAIN_CACHE_MS - 1)
+  assert.strictEqual(cached, first)
+  assert.equal(probes, 1)
+  assert.deepEqual(first.find(brain => brain.id === primary)?.models.map(model => model.id), ['model-1'])
+
+  const refreshed = await probeBrains(false, 1000 + BRAIN_CACHE_MS)
+  assert.equal(probes, 2)
+  assert.deepEqual(refreshed.find(brain => brain.id === primary)?.models.map(model => model.id), ['model-2'])
 })
 
 test('the default dialect is the schema untouched', () => {
